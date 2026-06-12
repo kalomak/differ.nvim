@@ -17,32 +17,11 @@
 ---@field old_text string
 ---@field new_text string
 
+local text_util = require("dipher.util.text")
+local to_lines = text_util.to_lines
+local ensure_trailing_nl = text_util.ensure_trailing_nl
+
 local M = {}
-
--- Split text into lines, tolerating a missing trailing newline
----@param text string
----@return string[]
-local function to_lines(text)
-    if text == "" then
-        return {}
-    end
-    local lines = vim.split(text, "\n", { plain = true })
-    if lines[#lines] == "" then
-        table.remove(lines)
-    end
-    return lines
-end
-
--- vim.text.diff is line-oriented; an unterminated final line reads as changed,
--- so normalise to newline-terminated before diffing
----@param text string
----@return string
-local function ensure_trailing_nl(text)
-    if text == "" or text:sub(-1) == "\n" then
-        return text
-    end
-    return text .. "\n"
-end
 
 -- Slice a 1-based inclusive range out of a line array
 ---@param lines string[]
