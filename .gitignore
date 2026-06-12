@@ -1,0 +1,5 @@
+/dipher-sidecar
+/bin/
+*.o
+.luarc.local.json
+docs/overview.md
