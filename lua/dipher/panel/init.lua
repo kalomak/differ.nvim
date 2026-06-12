@@ -142,6 +142,22 @@ function Panel:_highlight()
                     { end_col = m.status_col + #m.status, hl_group = hl }
                 )
             end
+            if m.add_col then
+                vim.api.nvim_buf_set_extmark(
+                    self.bufnr,
+                    ns,
+                    row,
+                    m.add_col,
+                    { end_col = m.add_end, hl_group = "dipherPanelCountAdd" }
+                )
+                vim.api.nvim_buf_set_extmark(
+                    self.bufnr,
+                    ns,
+                    row,
+                    m.del_col,
+                    { end_col = m.del_end, hl_group = "dipherPanelCountDelete" }
+                )
+            end
         end
     end
 end

@@ -16,6 +16,10 @@ local FOLD_OPEN, FOLD_CLOSED = "▾", "▸"
 ---@field collapsed boolean|nil
 ---@field status_col integer|nil  -- byte col of the status letter (file rows)
 ---@field name_col integer|nil    -- byte col where the name starts
+---@field add_col integer|nil     -- byte range of the +N count (file rows, when shown)
+---@field add_end integer|nil
+---@field del_col integer|nil     -- byte range of the -M count
+---@field del_end integer|nil
 
 ---@class dipher.panel.Block
 ---@field title string|nil               -- section header, nil = no header row
@@ -53,11 +57,7 @@ function M.lines(blocks)
             else
                 local e = row.entry
                 local line = indent .. e.status .. " " .. row.name
-                if e.additions and (e.additions > 0 or e.deletions > 0) then
-                    line = line .. ("  +%d -%d"):format(e.additions, e.deletions)
-                end
-                lines[#lines + 1] = line
-                meta[#meta + 1] = {
+                local m = {
                     kind = "file",
                     entry = e,
                     path = row.path,
@@ -65,6 +65,17 @@ function M.lines(blocks)
                     status_col = #indent,
                     name_col = #indent + 2, -- status letter + space
                 }
+                if e.additions and (e.additions > 0 or e.deletions > 0) then
+                    local add = ("+%d"):format(e.additions)
+                    local del = ("-%d"):format(e.deletions)
+                    m.add_col = #line + 2 -- after the two-space separator
+                    m.add_end = m.add_col + #add
+                    m.del_col = m.add_end + 1 -- after the single space
+                    m.del_end = m.del_col + #del
+                    line = line .. "  " .. add .. " " .. del
+                end
+                lines[#lines + 1] = line
+                meta[#meta + 1] = m
             end
         end
     end

@@ -18,6 +18,8 @@ local GROUPS = {
     dipherPanelRename = { link = "Changed" },
     dipherPanelUnmerged = { link = "DiffText" },
     dipherPanelUntracked = { link = "Comment" },
+    dipherPanelCountAdd = { link = "Added" },
+    dipherPanelCountDelete = { link = "Removed" },
 }
 
 -- Define all default highlight groups (default = true so users can override)

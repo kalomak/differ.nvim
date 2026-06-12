@@ -237,41 +237,6 @@ local function repo_root()
     return M.root(anchor)
 end
 
--- A changed-file's display line for the picker: status, with rename arrow.
----@param file dipher.git.ChangedFile
----@return string
-local function format_item(file)
-    local name = file.previous_path and (file.previous_path .. " → " .. file.path) or file.path
-    return ("%s  %s"):format(file.status, name)
-end
-
--- :Dipher [revspec] — the MVP changed-file picker (§8.1). Resolve the source, list
--- its changed files, and on selection open that file's diff. The persistent file
--- panel (§8.6) supersedes this as the primary surface but coexists with it.
----@param fargs string[]
-function M.open(fargs)
-    local root = repo_root()
-    if not root then
-        return notify("not inside a git repository", vim.log.levels.WARN)
-    end
-    local source = M.resolve(rev.source(fargs), root)
-    if not source then
-        return
-    end
-    local files = M.changed_files(source, root)
-    if #files == 0 then
-        return notify("no changes for this source")
-    end
-    vim.ui.select(files, {
-        prompt = "Dipher — changed files",
-        format_item = format_item,
-    }, function(choice)
-        if choice then
-            M.open_file(source, root, choice)
-        end
-    end)
-end
-
 -- True when `source` is the default HEAD-vs-worktree view — the only source git
 -- status can model as Staged/Unstaged/Untracked sections (§8.6 slice B). Rev-pair
 -- and merge-base sources (old is a sha, not HEAD) stay a single counted list.
@@ -284,8 +249,16 @@ end
 -- :Dipher panel — open (or toggle) the file panel (§8.6) over a git change set.
 -- Selecting a file re-sources the one View in place rather than spawning a new
 -- one. `opts.rev` is the rev spec; position/listing/height/width pass through to
--- the panel and are runtime-adjustable via Panel.current().
----@param opts { rev?: string|string[], position?: string, listing?: string, height?: integer, width?: integer }
+-- the panel and are runtime-adjustable via Panel.current(). `opts.open_first`
+-- selects the first file straight away (DiffviewOpen-style: bare `:Dipher`).
+---@class dipher.git.PanelOpts
+---@field rev? string|string[]
+---@field position? string
+---@field listing? string
+---@field height? integer
+---@field width? integer
+---@field open_first? boolean
+---@param opts dipher.git.PanelOpts
 ---@return dipher.Panel|nil
 function M.panel(opts)
     local Panel = require("dipher.panel")
@@ -336,7 +309,7 @@ function M.panel(opts)
     end
 
     local view ---@type dipher.View|nil -- the single diff view the panel drives
-    return Panel.new({
+    local panel = Panel.new({
         sections = nonempty,
         listing = opts.listing,
         position = opts.position,
@@ -351,6 +324,10 @@ function M.panel(opts)
             end
         end,
     }):open()
+    if opts.open_first then
+        panel:select() -- cursor sits on the first file row after :open
+    end
+    return panel
 end
 
 return M

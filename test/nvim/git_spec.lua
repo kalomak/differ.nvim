@@ -176,37 +176,29 @@ describe(":Dipher panel", function()
     end)
 end)
 
-describe(":Dipher picker", function()
-    -- Drive vim.ui.select deterministically: pick the entry matching `path`.
-    local function with_pick(path, fn)
-        local orig = vim.ui.select
-        vim.ui.select = function(items, _, on_choice)
-            for _, it in ipairs(items) do
-                if it.path == path then
-                    return on_choice(it)
-                end
-            end
-            return on_choice(nil)
-        end
-        local ok, err = pcall(fn)
-        vim.ui.select = orig
-        assert(ok, err)
+describe(":Dipher (open_first)", function()
+    local Panel = require("dipher.panel")
+
+    -- p:select returns focus to the panel, so the View lives in the origin window.
+    local function view_in_origin(p)
+        vim.api.nvim_set_current_win(p.origin_win)
+        return require("dipher.view").current()
     end
 
-    it("opens the picked file's diff: HEAD vs worktree by default", function()
+    it("opens the panel and the first file's diff (DiffviewOpen-style)", function()
         local root = fresh_repo()
         write(root .. "/a.lua", "local x = 2\nreturn x\n")
         vim.cmd.edit(root .. "/a.lua")
 
-        with_pick("a.lua", function()
-            git_src.open({})
-        end)
-        local v = require("dipher.view").current()
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        assert.is_not_nil(p)
+        local v = view_in_origin(p)
         assert.is_not_nil(v)
         assert.are.equal("a.lua", v.model.path)
-        assert.are.equal(V1, v.model.old_text)
-        assert.are.equal("local x = 2\nreturn x\n", v.model.new_text)
-        v:close()
+        assert.are.equal(V1, v.model.old_text) -- index (nothing staged) == HEAD
+        assert.are.equal("local x = 2\nreturn x\n", v.model.new_text) -- worktree
+        p:close()
     end)
 
     it("resolves a merge-base (three-dot) against the working tree", function()
@@ -219,14 +211,13 @@ describe(":Dipher picker", function()
         vim.cmd.edit(root .. "/a.lua")
 
         -- main... => merge-base(main, HEAD) [the init commit, V1] vs worktree [V3]
-        with_pick("a.lua", function()
-            git_src.open({ "main..." })
-        end)
-        local v = require("dipher.view").current()
+        git_src.panel({ rev = "main...", open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
         assert.is_not_nil(v)
         assert.are.equal(V1, v.model.old_text)
         assert.are.equal("local x = 3\nreturn x\n", v.model.new_text)
         assert.are.equal("main...", v.model.old_rev)
-        v:close()
+        p:close()
     end)
 end)

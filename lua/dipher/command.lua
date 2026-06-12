@@ -49,7 +49,8 @@ function M.context(arg)
     end
 end
 
--- :Dipher panel [revspec] — open/toggle the file panel (§8.6) over a change set.
+-- :Dipher panel [revspec] — open/toggle the file panel (§8.6) over a change set,
+-- without auto-selecting a file (bare `:Dipher` is the open-and-show entry).
 ---@param arg string|nil
 function M.panel(arg)
     require("dipher.git").panel({ rev = (arg ~= "" and arg) or nil })
@@ -58,16 +59,17 @@ end
 ---@type table<string, fun(arg: string|nil)>
 local SUB = { layout = M.layout, context = M.context, panel = M.panel }
 
--- Route `:Dipher ...`. A recognised subcommand (layout/context) takes its arg;
--- anything else — including no args — is a local-diff rev spec (§8.1), so
--- `:Dipher`, `:Dipher main...`, `:Dipher a..b` all open a diff of the current file.
+-- Route `:Dipher ...`. A recognised subcommand (layout/context/panel) takes its
+-- arg; anything else — including no args — is a local-diff rev spec (§8.1), so
+-- `:Dipher`, `:Dipher main...`, `:Dipher a..b` open the file panel over that
+-- change set and show the first file's diff (DiffviewOpen-style).
 ---@param fargs string[]
 function M.dispatch(fargs)
     local handler = fargs[1] and SUB[fargs[1]]
     if handler then
         return handler(fargs[2])
     end
-    require("dipher.git").open(fargs)
+    require("dipher.git").panel({ rev = fargs, open_first = true })
 end
 
 ---@type table<string, string[]>

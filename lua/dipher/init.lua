@@ -62,19 +62,14 @@ function M.diff(spec)
     return M.diff_model(model, { layout = spec.layout, context = spec.context })
 end
 
--- Open a local git diff for the current file from a rev spec (§8.1). The entry
--- point keymaps bind to this — e.g. `require("dipher").open("main...")` for the
--- branch-total diff. A string is one rev token; pass a table for multi-arg forms.
+-- Open a local git change set from a rev spec (§8.1), DiffviewOpen-style: the file
+-- panel plus the first file's diff. The entry-point keymaps bind to this — e.g.
+-- `require("dipher").open("main...")` for the branch-total diff. A string is one
+-- rev token; pass a table for multi-arg forms.
 ---@param spec string|string[]|nil
----@return dipher.View|nil
+---@return dipher.Panel|nil
 function M.open(spec)
-    local args = {}
-    if type(spec) == "table" then
-        args = spec
-    elseif type(spec) == "string" and spec ~= "" then
-        args = { spec }
-    end
-    return require("dipher.git").open(args)
+    return require("dipher.git").panel({ rev = spec, open_first = true })
 end
 
 -- Open (or toggle) the file panel over a local git change set (§8.6). `opts` are

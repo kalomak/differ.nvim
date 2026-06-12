@@ -24,10 +24,20 @@ describe("panel.render.lines", function()
         assert.are.equal(2, m.name_col) -- name after "M "
     end)
 
-    it("appends +/- counts only when nonzero", function()
+    it("appends +/- counts only when nonzero, with byte cols for each", function()
         local root = tree.build({ entry("a.lua", "M", 3, 1) })
         local out = render.lines({ { rows = tree.rows(root, "tree", {}) } })
         assert.are.equal("M a.lua  +3 -1", out.lines[1])
+        local m = out.meta[1]
+        -- "M a.lua  +3 -1": "+3" at cols 9..11, "-1" at cols 12..14
+        assert.are.equal("+3", out.lines[1]:sub(m.add_col + 1, m.add_end))
+        assert.are.equal("-1", out.lines[1]:sub(m.del_col + 1, m.del_end))
+    end)
+
+    it("leaves count cols nil when there are no changes", function()
+        local root = tree.build({ entry("a.lua", "M", 0, 0) })
+        local out = render.lines({ { rows = tree.rows(root, "tree", {}) } })
+        assert.is_nil(out.meta[1].add_col)
     end)
 
     it("renders a collapsed dir with a closed fold arrow and trailing slash", function()
