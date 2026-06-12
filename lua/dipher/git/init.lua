@@ -8,6 +8,13 @@ local rev = require("dipher.git.rev")
 
 local M = {}
 
+-- The three working-tree side refs (§8.6 slice B). Staged diffs read HEAD↔index,
+-- unstaged diffs read index↔worktree; an untracked file is absent from the index
+-- so its index read returns nil and the diff renders as a pure add.
+local HEAD = { kind = "rev", rev = "HEAD", label = "HEAD" }
+local INDEX = { kind = "index", label = "INDEX" }
+local WORKTREE = { kind = "worktree", label = "WORKTREE" }
+
 ---@param msg string
 ---@param level integer|nil
 local function notify(msg, level)
@@ -139,23 +146,87 @@ function M.open_file(source, root, file)
     return require("dipher").diff_model(M.model(source, root, file))
 end
 
--- The change set as panel FileEntry records. Counts and staged/unstaged sections
--- are filled in slice B; for now it's one flat list with zeroed counts.
+-- Parse a `git diff --numstat -z [...]` run into a path -> counts map. Returns an
+-- empty map on git failure so callers degrade to zeroed counts.
+---@param args string[] -- extra args after `diff --numstat -z`
+---@param root string
+---@return table<string, { additions: integer, deletions: integer }>
+local function numstat(args, root)
+    local full = { "diff", "--numstat", "-z" }
+    vim.list_extend(full, args)
+    return rev.parse_numstat(git(full, root) or "")
+end
+
+-- The change set as panel FileEntry records — one flat list with `+N -M` counts,
+-- used for rev-pair sources. Working-tree sources use status_sections instead.
 ---@param source dipher.git.Source -- resolved
 ---@param root string
 ---@return dipher.FileEntry[]
 function M.file_entries(source, root)
+    local counts = numstat(rev.diff_args(source), root)
     local out = {}
     for _, f in ipairs(M.changed_files(source, root)) do
+        local c = counts[f.path] or {}
         out[#out + 1] = {
             path = f.path,
             status = f.status,
-            additions = 0,
-            deletions = 0,
+            additions = c.additions or 0,
+            deletions = c.deletions or 0,
             previous_path = f.previous_path,
         }
     end
     return out
+end
+
+-- Working-tree status as panel sections — Staged / Unstaged / Untracked (§8.6
+-- slice B). git status compares HEAD/index/worktree, so it only models the
+-- default HEAD-vs-worktree source; rev-pair sources use file_entries instead.
+-- A file edited in both index and worktree (e.g. "MM") appears in both Staged
+-- (X status, HEAD↔index counts) and Unstaged (Y status, index↔worktree counts).
+-- Empty sections are dropped by the caller.
+---@param root string
+---@return dipher.panel.Section[]
+function M.status_sections(root)
+    local entries = rev.parse_status(git({ "status", "--porcelain=v1", "-z", "-uall" }, root) or "")
+    local staged_counts = numstat({ "--cached" }, root)
+    local unstaged_counts = numstat({}, root)
+    local staged, unstaged, untracked = {}, {}, {}
+    for _, s in ipairs(entries) do
+        if s.x == "?" then
+            untracked[#untracked + 1] =
+                { path = s.path, status = "?", additions = 0, deletions = 0, staged = false }
+        else
+            -- previous_path only belongs to whichever side carries the rename:
+            -- an "RM" file is renamed HEAD↔index but plain-modified index↔worktree.
+            if s.x ~= " " then
+                local c = staged_counts[s.path] or {}
+                staged[#staged + 1] = {
+                    path = s.path,
+                    status = s.x,
+                    additions = c.additions or 0,
+                    deletions = c.deletions or 0,
+                    staged = true,
+                    previous_path = (s.x == "R" or s.x == "C") and s.previous_path or nil,
+                }
+            end
+            if s.y ~= " " then
+                local c = unstaged_counts[s.path] or {}
+                unstaged[#unstaged + 1] = {
+                    path = s.path,
+                    status = s.y,
+                    additions = c.additions or 0,
+                    deletions = c.deletions or 0,
+                    staged = false,
+                    previous_path = (s.y == "R" or s.y == "C") and s.previous_path or nil,
+                }
+            end
+        end
+    end
+    return {
+        { title = "Staged", entries = staged },
+        { title = "Unstaged", entries = unstaged },
+        { title = "Untracked", entries = untracked },
+    }
 end
 
 -- The repo to operate on: the current file's repo if it's a real file, else cwd.
@@ -201,6 +272,15 @@ function M.open(fargs)
     end)
 end
 
+-- True when `source` is the default HEAD-vs-worktree view — the only source git
+-- status can model as Staged/Unstaged/Untracked sections (§8.6 slice B). Rev-pair
+-- and merge-base sources (old is a sha, not HEAD) stay a single counted list.
+---@param source dipher.git.Source -- resolved
+---@return boolean
+local function is_worktree_status(source)
+    return source.old.kind == "rev" and source.old.rev == "HEAD" and source.new.kind == "worktree"
+end
+
 -- :Dipher panel — open (or toggle) the file panel (§8.6) over a git change set.
 -- Selecting a file re-sources the one View in place rather than spawning a new
 -- one. `opts.rev` is the rev spec; position/listing/height/width pass through to
@@ -224,20 +304,46 @@ function M.panel(opts)
     if not source then
         return
     end
-    local entries = M.file_entries(source, root)
-    if #entries == 0 then
+
+    -- model_for picks the (old, new) pair per entry: working-tree sections diff by
+    -- the entry's staged flag (staged = HEAD↔index, else index↔worktree), while a
+    -- rev-pair list diffs every entry against the one resolved source.
+    local sections, model_for
+    if is_worktree_status(source) then
+        sections = M.status_sections(root)
+        model_for = function(entry)
+            local s = entry.staged and { old = HEAD, new = INDEX }
+                or { old = INDEX, new = WORKTREE }
+            return M.model(s, root, entry)
+        end
+    else
+        sections = { { title = nil, entries = M.file_entries(source, root) } }
+        model_for = function(entry)
+            return M.model(source, root, entry)
+        end
+    end
+
+    -- Drop empty sections so the panel never shows a bare "Staged (0)" header.
+    local nonempty, total = {}, 0
+    for _, sec in ipairs(sections) do
+        if #sec.entries > 0 then
+            nonempty[#nonempty + 1] = sec
+            total = total + #sec.entries
+        end
+    end
+    if total == 0 then
         return notify("no changes for this source")
     end
 
     local view ---@type dipher.View|nil -- the single diff view the panel drives
     return Panel.new({
-        sections = { { title = nil, entries = entries } },
+        sections = nonempty,
         listing = opts.listing,
         position = opts.position,
         height = opts.height,
         width = opts.width,
         on_select = function(entry)
-            local model = M.model(source, root, entry)
+            local model = model_for(entry)
             if view and view:is_open() then
                 view:set_source(model)
             else

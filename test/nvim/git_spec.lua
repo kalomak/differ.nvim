@@ -84,38 +84,94 @@ end)
 describe(":Dipher panel", function()
     local Panel = require("dipher.panel")
 
-    it("opens a panel listing the change set and toggles closed", function()
+    it("opens the default panel as a single Unstaged section and toggles closed", function()
         local root = fresh_repo()
-        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- modified, not staged
         vim.cmd.edit(root .. "/a.lua")
 
         git_src.panel({})
         local p = Panel.current()
         assert.is_not_nil(p)
         assert.is_true(p:is_open())
-        assert.are.same({ "M a.lua" }, vim.api.nvim_buf_get_lines(p.bufnr, 0, -1, false))
+        -- header + the one file row; the empty Staged/Untracked sections are dropped
+        assert.are.same(
+            { "Unstaged (1)", "M a.lua  +1 -1" },
+            vim.api.nvim_buf_get_lines(p.bufnr, 0, -1, false)
+        )
 
         git_src.panel({}) -- toggle
         assert.is_nil(Panel.current())
     end)
 
-    it("re-sources one View in place as files are selected", function()
+    it("groups staged / unstaged / untracked into sections with counts", function()
         local root = fresh_repo()
-        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- unstaged modify of a.lua
         write(root .. "/z.lua", "local z = 9\n")
-        git(root, "add", "z.lua") -- z is a new (added) file in the change set
+        git(root, "add", "z.lua") -- staged add
+        write(root .. "/u.lua", "untracked\n") -- untracked
         vim.cmd.edit(root .. "/a.lua")
 
         git_src.panel({})
         local p = Panel.current()
-        -- a.lua then z.lua (sorted); pick the first, then the second
-        vim.api.nvim_win_set_cursor(p.winid, { 1, 0 })
+        assert.are.same({
+            "Staged (1)",
+            "A z.lua  +1 -0",
+            "Unstaged (1)",
+            "M a.lua  +1 -1",
+            "Untracked (1)",
+            "? u.lua",
+        }, vim.api.nvim_buf_get_lines(p.bufnr, 0, -1, false))
+        p:close()
+    end)
+
+    it("re-sources one View in place as files are selected", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- unstaged modify (Unstaged)
+        write(root .. "/z.lua", "local z = 9\n")
+        git(root, "add", "z.lua") -- staged add (Staged)
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({})
+        local p = Panel.current()
+        -- buffer is: Staged header, z.lua, Unstaged header, a.lua — pick both files
+        vim.api.nvim_win_set_cursor(p.winid, { 2, 0 }) -- z.lua (staged: HEAD vs index)
         p:select()
         local diff_buf = vim.api.nvim_win_get_buf(p.origin_win)
-        vim.api.nvim_win_set_cursor(p.winid, { 2, 0 })
+        vim.api.nvim_win_set_cursor(p.winid, { 4, 0 }) -- a.lua (unstaged: index vs worktree)
         p:select()
         -- same window + buffer: the View was re-sourced, not recreated
         assert.are.equal(diff_buf, vim.api.nvim_win_get_buf(p.origin_win))
+        p:close()
+    end)
+
+    it("diffs a staged entry HEAD↔index and an unstaged entry index↔worktree", function()
+        local root = fresh_repo()
+        -- stage one version of a.lua, then edit further in the worktree
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        git(root, "add", "a.lua")
+        write(root .. "/a.lua", "local x = 3\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({})
+        local p = Panel.current()
+        -- p:select returns focus to the panel, so look the View up via the origin
+        -- window's buffer (View.current keys off the focused buffer).
+        local function view_in_origin()
+            vim.api.nvim_set_current_win(p.origin_win)
+            return require("dipher.view").current()
+        end
+        -- a.lua is "MM": staged (line 2) and unstaged (line 4)
+        vim.api.nvim_win_set_cursor(p.winid, { 2, 0 })
+        p:select()
+        local v = view_in_origin()
+        assert.are.equal(V1, v.model.old_text) -- HEAD
+        assert.are.equal("local x = 2\nreturn x\n", v.model.new_text) -- index
+
+        vim.api.nvim_win_set_cursor(p.winid, { 4, 0 })
+        p:select()
+        v = view_in_origin()
+        assert.are.equal("local x = 2\nreturn x\n", v.model.old_text) -- index
+        assert.are.equal("local x = 3\nreturn x\n", v.model.new_text) -- worktree
         p:close()
     end)
 end)

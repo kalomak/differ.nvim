@@ -78,3 +78,53 @@ describe("git.rev.parse_name_status", function()
         assert.are.same({}, rev.parse_name_status(""))
     end)
 end)
+
+describe("git.rev.parse_status", function()
+    it("splits XY into staged (x) and unstaged (y) state", function()
+        -- MM = staged + unstaged edit; ?? = untracked; " M" = unstaged-only
+        local out = "MM src/keep.txt\0?? src/new.txt\0 M src/edit.txt\0"
+        assert.are.same({
+            { x = "M", y = "M", path = "src/keep.txt" },
+            { x = "?", y = "?", path = "src/new.txt" },
+            { x = " ", y = "M", path = "src/edit.txt" },
+        }, rev.parse_status(out))
+    end)
+
+    it("attaches previous_path from the next field on a rename", function()
+        local out = "R  deep/new.txt\0deep/old.txt\0M  src/a.txt\0"
+        assert.are.same({
+            { x = "R", y = " ", path = "deep/new.txt", previous_path = "deep/old.txt" },
+            { x = "M", y = " ", path = "src/a.txt" },
+        }, rev.parse_status(out))
+    end)
+
+    it("returns nothing for empty output", function()
+        assert.are.same({}, rev.parse_status(""))
+    end)
+end)
+
+describe("git.rev.parse_numstat", function()
+    it("maps paths to additions/deletions", function()
+        local out = "2\t1\tsrc/keep.txt\0" .. "10\t0\tsrc/add.txt\0"
+        assert.are.same({
+            ["src/keep.txt"] = { additions = 2, deletions = 1 },
+            ["src/add.txt"] = { additions = 10, deletions = 0 },
+        }, rev.parse_numstat(out))
+    end)
+
+    it("keys a rename on the new path (empty path field + old, new)", function()
+        local out = "0\t0\t\0deep/old.txt\0deep/new.txt\0"
+        assert.are.same({
+            ["deep/new.txt"] = { additions = 0, deletions = 0 },
+        }, rev.parse_numstat(out))
+    end)
+
+    it("treats binary `-` counts as zero", function()
+        local out = "-\t-\timg.png\0"
+        assert.are.same({ ["img.png"] = { additions = 0, deletions = 0 } }, rev.parse_numstat(out))
+    end)
+
+    it("returns nothing for empty output", function()
+        assert.are.same({}, rev.parse_numstat(""))
+    end)
+end)

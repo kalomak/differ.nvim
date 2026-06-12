@@ -134,4 +134,63 @@ function M.parse_name_status(out)
     return files
 end
 
+---@class dipher.git.StatusEntry
+---@field x string                  -- index/staged status letter (" " if clean)
+---@field y string                  -- worktree/unstaged status letter (" " if clean)
+---@field path string
+---@field previous_path string|nil  -- source path on rename/copy
+
+-- Parse `git status --porcelain=v1 -z -uall` (§8.6 slice B). Each record is
+-- `XY<sp><path>`; X is the staged (HEAD↔index) state, Y the unstaged
+-- (index↔worktree) state. Rename/copy records (X or Y = R/C) carry the original
+-- path in the *next* NUL field, which we attach as previous_path.
+---@param out string
+---@return dipher.git.StatusEntry[]
+function M.parse_status(out)
+    local toks = nul_split(out)
+    local entries, i = {}, 1
+    while i <= #toks do
+        local rec = toks[i]
+        i = i + 1
+        if rec == "" then
+            break -- trailing empty field from the final NUL
+        end
+        local x, y, path = rec:sub(1, 1), rec:sub(2, 2), rec:sub(4)
+        local prev
+        if x == "R" or x == "C" or y == "R" or y == "C" then
+            prev = toks[i]
+            i = i + 1
+        end
+        entries[#entries + 1] = { x = x, y = y, path = path, previous_path = prev }
+    end
+    return entries
+end
+
+-- Parse `git diff --numstat -z` into a path -> {additions, deletions} map (§8.6
+-- slice B). A normal record is `<add>\t<del>\t<path>`; a rename leaves the path
+-- field empty and emits the old then new path as the next two NUL fields (we key
+-- on the new path). Binary files report `-` counts, which become 0.
+---@param out string
+---@return table<string, { additions: integer, deletions: integer }>
+function M.parse_numstat(out)
+    local toks = nul_split(out)
+    local counts, i = {}, 1
+    while i <= #toks do
+        local rec = toks[i]
+        i = i + 1
+        if rec == "" then
+            break
+        end
+        local add, del, path = rec:match("^(%S+)\t(%S+)\t(.*)$")
+        if add then
+            if path == "" then -- rename: old then new follow
+                path = toks[i + 1]
+                i = i + 2
+            end
+            counts[path] = { additions = tonumber(add) or 0, deletions = tonumber(del) or 0 }
+        end
+    end
+    return counts
+end
+
 return M
