@@ -1,9 +1,18 @@
--- Buffer lifecycle: own one derived buffer per render column, apply render output,
--- hold each column's map. Buffers + maps are regenerated atomically; overlays are
--- extmark-only. A render is N aligned columns (stacked: 1 unified; split: old/new).
+-- View lifecycle: own one derived buffer per render column, lay them into windows
+-- (one for stacked, a scroll-bound pair for split), and hold each column's map.
+-- Buffers + maps are regenerated atomically on re-render; the gutter rail and the
+-- highlight layer are refreshed from the map; overlays are extmark-only.
+
+local render = require("dipher.render")
+local paint = require("dipher.ui.paint")
+local statuscolumn = require("dipher.ui.statuscolumn")
+
+local ns = vim.api.nvim_create_namespace("dipher")
+local STATUSCOLUMN_EXPR = '%!v:lua.require("dipher.ui.statuscolumn").render()'
 
 ---@class dipher.ViewColumn
 ---@field bufnr integer
+---@field winid integer|nil
 ---@field map dipher.LineMap
 ---@field side dipher.ColumnSide
 
@@ -12,13 +21,25 @@
 ---@field model dipher.DiffModel
 ---@field layout dipher.Layout
 ---@field context integer
+---@field deep_diff table
 local View = {}
 View.__index = View
 
-local render = require("dipher.render")
+-- Per-window appearance: our own dual-rail gutter replaces the native gutter.
+---@param winid integer
+---@param bufnr integer
+local function setup_window(winid, bufnr)
+    vim.api.nvim_win_set_buf(winid, bufnr)
+    vim.wo[winid].number = false
+    vim.wo[winid].relativenumber = false
+    vim.wo[winid].signcolumn = "no"
+    vim.wo[winid].foldcolumn = "0"
+    vim.wo[winid].wrap = false
+    vim.wo[winid].statuscolumn = STATUSCOLUMN_EXPR
+end
 
--- Create a view for a model; buffers are allocated lazily to match the render's
--- column count on first render.
+-- Build a view for a model. Buffers and data are created here; windows are not
+-- touched until :open(), so a View can be constructed headlessly for tests.
 ---@param model dipher.DiffModel
 ---@param opts { layout: dipher.Layout, context: integer, deep_diff: table }
 ---@return dipher.View
@@ -28,13 +49,14 @@ function View.new(model, opts)
         model = model,
         layout = opts.layout,
         context = opts.context,
+        deep_diff = opts.deep_diff,
     }, View)
     self:rerender(opts)
     return self
 end
 
--- The map of the column for a side, or the unified map. Consumers (]c, staging,
--- comment anchoring) read this rather than branching on layout themselves.
+-- The map for a side, or the unified map. Consumers (]c, staging, comment
+-- anchoring) read this rather than branching on layout themselves.
 ---@param side dipher.ColumnSide
 ---@return dipher.LineMap|nil
 function View:map_for(side)
@@ -46,11 +68,14 @@ function View:map_for(side)
     return nil
 end
 
--- Re-render the active model and atomically replace each column's content and map.
+-- Re-render the active model and atomically replace each column's content, map,
+-- gutter rail, and highlight layer. Window layout is unchanged; if a re-render
+-- changes the column count (a layout toggle), call :open() to relayout.
 ---@param opts { layout: dipher.Layout, context: integer, deep_diff: table }
 function View:rerender(opts)
     self.layout = opts.layout
     self.context = opts.context
+    self.deep_diff = opts.deep_diff
     local result = render.render(self.model, opts)
 
     for i, col in ipairs(result.columns) do
@@ -59,18 +84,66 @@ function View:rerender(opts)
         vim.bo[bufnr].modifiable = true
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, col.lines)
         vim.bo[bufnr].modifiable = false
-        self.columns[i] = { bufnr = bufnr, map = col.map, side = col.side }
+        paint.apply(bufnr, ns, col)
+        statuscolumn.set(bufnr, statuscolumn.format(col))
+        self.columns[i] = {
+            bufnr = bufnr,
+            winid = existing and existing.winid or nil,
+            map = col.map,
+            side = col.side,
+        }
     end
-    -- A layout toggle can change column count (1 <-> 2); drop stale buffers.
+    -- Shrinking column count (split -> stacked): drop the surplus buffers/windows.
     for i = #result.columns + 1, #self.columns do
-        local stale = self.columns[i]
-        if stale and vim.api.nvim_buf_is_valid(stale.bufnr) then
-            vim.api.nvim_buf_delete(stale.bufnr, { force = true })
-        end
+        self:_discard(self.columns[i])
         self.columns[i] = nil
     end
-    -- TODO: lay columns into windows (scrollbind when >1), apply word-level +
-    -- thread extmark layers, wire the statuscolumn rail cache from each map.
+end
+
+-- Lay the columns into windows from the current window outward. Stacked takes the
+-- current window; split makes it the left (old) column and vsplits a scroll-bound
+-- right (new) column.
+---@return dipher.View
+function View:open()
+    local base = vim.api.nvim_get_current_win()
+    self.columns[1].winid = base
+    setup_window(base, self.columns[1].bufnr)
+
+    if #self.columns > 1 then
+        vim.cmd("rightbelow vsplit")
+        local right = vim.api.nvim_get_current_win()
+        self.columns[2].winid = right
+        setup_window(right, self.columns[2].bufnr)
+        for _, col in ipairs(self.columns) do
+            vim.wo[col.winid].scrollbind = true
+        end
+        vim.api.nvim_set_current_win(base)
+        vim.cmd("syncbind")
+    end
+    return self
+end
+
+-- Tear down a single column's window (if any) and buffer.
+---@param col dipher.ViewColumn|nil
+function View:_discard(col)
+    if not col then
+        return
+    end
+    statuscolumn.clear(col.bufnr)
+    if col.winid and vim.api.nvim_win_is_valid(col.winid) then
+        pcall(vim.api.nvim_win_close, col.winid, true)
+    end
+    if vim.api.nvim_buf_is_valid(col.bufnr) then
+        vim.api.nvim_buf_delete(col.bufnr, { force = true })
+    end
+end
+
+-- Close all windows and delete all buffers owned by the view.
+function View:close()
+    for _, col in ipairs(self.columns) do
+        self:_discard(col)
+    end
+    self.columns = {}
 end
 
 return View

@@ -6,6 +6,43 @@ local M = {}
 ---@type table<integer, string[]> -- bufnr -> pre-formatted rail string per lnum
 local rails = {}
 
+-- Pre-format the gutter string for every line of a column from its map. Pure, so
+-- the statuscolumn callback only does an O(1) index per redraw (§11). A unified
+-- column shows both rails (old left / new right); a side column shows only its
+-- own number; absent sides and meta/filler rows render as blanks.
+---@param column dipher.Column
+---@return string[]
+function M.format(column)
+    local lines = column.map.lines
+    local wo, wn = 1, 1
+    for _, l in ipairs(lines) do
+        if l.old then
+            wo = math.max(wo, #tostring(l.old))
+        end
+        if l.new then
+            wn = math.max(wn, #tostring(l.new))
+        end
+    end
+    local function cell(num, width)
+        if not num then
+            return string.rep(" ", width)
+        end
+        local s = tostring(num)
+        return string.rep(" ", width - #s) .. s
+    end
+    local out = {}
+    for i, l in ipairs(lines) do
+        if column.side == "old" then
+            out[i] = cell(l.old, wo) .. " "
+        elseif column.side == "new" then
+            out[i] = cell(l.new, wn) .. " "
+        else
+            out[i] = cell(l.old, wo) .. " " .. cell(l.new, wn) .. " "
+        end
+    end
+    return out
+end
+
 -- Store pre-formatted rail strings for a buffer after a render
 ---@param bufnr integer
 ---@param strings string[]
@@ -22,7 +59,6 @@ end
 -- statuscolumn callback: return the rail string for the current line
 ---@return string
 function M.render()
-    -- TODO: index rails[bufnr] by v:lnum once renderers populate the cache
     local buf = vim.g.statusline_winid and vim.api.nvim_win_get_buf(vim.g.statusline_winid)
     local cache = buf and rails[buf]
     if not cache then
