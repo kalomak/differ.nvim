@@ -220,6 +220,22 @@ describe("view context controls", function()
     end)
 end)
 
+describe("view re-source", function()
+    it("set_source swaps the file in place, reusing the column buffer", function()
+        local v = View.new(model("a\nb\n", "a\nB\n"), {
+            layout = "stacked",
+            context = math.huge,
+            deep_diff = { enabled = true },
+        })
+        v:open()
+        local buf = v.columns[1].bufnr
+        v:set_source(model("x\ny\n", "x\nY\n"))
+        assert.are.equal(buf, v.columns[1].bufnr) -- same buffer, re-rendered
+        assert.are.same({ "x", "y", "Y" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+        v:close()
+    end)
+end)
+
 describe("command router", function()
     local command = require("dipher.command")
 
@@ -245,7 +261,7 @@ describe("command router", function()
     it("completes subcommands and values", function()
         local subs = command.complete("", "Dipher ")
         table.sort(subs)
-        assert.are.same({ "context", "layout" }, subs)
+        assert.are.same({ "context", "layout", "panel" }, subs)
         assert.are.same(
             { "split", "stacked" },
             (function()

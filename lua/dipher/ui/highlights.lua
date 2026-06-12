@@ -9,6 +9,15 @@ local GROUPS = {
     dipherWordDelete = { link = "DiffText", bold = true },
     dipherWordAdd = { link = "DiffText", bold = true },
     dipherThreadRange = { link = "Visual" },
+    -- File panel (§8.6)
+    dipherPanelHeader = { link = "Title" },
+    dipherPanelDir = { link = "Directory" },
+    dipherPanelAdd = { link = "Added" },
+    dipherPanelModify = { link = "Changed" },
+    dipherPanelDelete = { link = "Removed" },
+    dipherPanelRename = { link = "Changed" },
+    dipherPanelUnmerged = { link = "DiffText" },
+    dipherPanelUntracked = { link = "Comment" },
 }
 
 -- Define all default highlight groups (default = true so users can override)

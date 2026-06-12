@@ -113,21 +113,49 @@ function M.resolve(source, root)
     return { old = old, new = new }
 end
 
--- Open the diff for one changed file under an already-resolved source. Renames
--- read the old side from `previous_path`; an added/deleted side reads as empty.
+-- Build a DiffModel for one changed file under an already-resolved source.
+-- Renames read the old side from `previous_path`; an absent side reads as empty.
 ---@param source dipher.git.Source -- resolved (no merge_base refs)
 ---@param root string
----@param file dipher.git.ChangedFile
----@return dipher.View
-function M.open_file(source, root, file)
+---@param file dipher.git.ChangedFile|dipher.FileEntry
+---@return dipher.DiffModel
+function M.model(source, root, file)
     local old_path = file.previous_path or file.path
-    return require("dipher").diff({
+    return require("dipher.model.diff").build({
         path = file.path,
         old_rev = source.old.label,
         new_rev = source.new.label,
         old_text = M.read(source.old, root, old_path) or "",
         new_text = M.read(source.new, root, file.path) or "",
     })
+end
+
+-- Open the diff for one changed file under an already-resolved source.
+---@param source dipher.git.Source
+---@param root string
+---@param file dipher.git.ChangedFile
+---@return dipher.View
+function M.open_file(source, root, file)
+    return require("dipher").diff_model(M.model(source, root, file))
+end
+
+-- The change set as panel FileEntry records. Counts and staged/unstaged sections
+-- are filled in slice B; for now it's one flat list with zeroed counts.
+---@param source dipher.git.Source -- resolved
+---@param root string
+---@return dipher.FileEntry[]
+function M.file_entries(source, root)
+    local out = {}
+    for _, f in ipairs(M.changed_files(source, root)) do
+        out[#out + 1] = {
+            path = f.path,
+            status = f.status,
+            additions = 0,
+            deletions = 0,
+            previous_path = f.previous_path,
+        }
+    end
+    return out
 end
 
 -- The repo to operate on: the current file's repo if it's a real file, else cwd.
@@ -171,6 +199,52 @@ function M.open(fargs)
             M.open_file(source, root, choice)
         end
     end)
+end
+
+-- :Dipher panel — open (or toggle) the file panel (§8.6) over a git change set.
+-- Selecting a file re-sources the one View in place rather than spawning a new
+-- one. `opts.rev` is the rev spec; position/listing/height/width pass through to
+-- the panel and are runtime-adjustable via Panel.current().
+---@param opts { rev?: string|string[], position?: string, listing?: string, height?: integer, width?: integer }
+---@return dipher.Panel|nil
+function M.panel(opts)
+    local Panel = require("dipher.panel")
+    local open = Panel.current()
+    if open and open:is_open() then
+        open:close()
+        return nil
+    end
+
+    local root = repo_root()
+    if not root then
+        return notify("not inside a git repository", vim.log.levels.WARN)
+    end
+    local args = type(opts.rev) == "table" and opts.rev or (opts.rev and { opts.rev }) or {}
+    local source = M.resolve(rev.source(args), root)
+    if not source then
+        return
+    end
+    local entries = M.file_entries(source, root)
+    if #entries == 0 then
+        return notify("no changes for this source")
+    end
+
+    local view ---@type dipher.View|nil -- the single diff view the panel drives
+    return Panel.new({
+        sections = { { title = nil, entries = entries } },
+        listing = opts.listing,
+        position = opts.position,
+        height = opts.height,
+        width = opts.width,
+        on_select = function(entry)
+            local model = M.model(source, root, entry)
+            if view and view:is_open() then
+                view:set_source(model)
+            else
+                view = require("dipher").diff_model(model)
+            end
+        end,
+    }):open()
 end
 
 return M

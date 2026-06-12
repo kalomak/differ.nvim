@@ -29,13 +29,29 @@ end
 ---@field layout dipher.Layout|nil
 ---@field context integer|nil
 
+-- Open a View from an already-built DiffModel. The git frontend and panel use
+-- this; `opts` overrides the layout/context defaults per-view.
+---@param model dipher.DiffModel
+---@param opts { layout?: dipher.Layout, context?: integer }|nil
+---@return dipher.View
+function M.diff_model(model, opts)
+    require("dipher.ui.highlights").setup()
+    local cfg = M.get_config()
+    opts = opts or {}
+    return require("dipher.view")
+        .new(model, {
+            layout = opts.layout or cfg.layout,
+            context = opts.context or cfg.context,
+            deep_diff = cfg.deep_diff,
+        })
+        :open()
+end
+
 -- Open a diff view for an old/new text pair. The frontends (local git, PR) build
 -- their DiffModel from real sources; this is the shared, source-agnostic entry.
 ---@param spec dipher.DiffSpec
 ---@return dipher.View
 function M.diff(spec)
-    require("dipher.ui.highlights").setup()
-    local cfg = M.get_config()
     local model = require("dipher.model.diff").build({
         path = spec.path or "",
         old_rev = spec.old_rev or "OLD",
@@ -43,12 +59,7 @@ function M.diff(spec)
         old_text = spec.old_text,
         new_text = spec.new_text,
     })
-    local view = require("dipher.view").new(model, {
-        layout = spec.layout or cfg.layout,
-        context = spec.context or cfg.context,
-        deep_diff = cfg.deep_diff,
-    })
-    return view:open()
+    return M.diff_model(model, { layout = spec.layout, context = spec.context })
 end
 
 -- Open a local git diff for the current file from a rev spec (§8.1). The entry
@@ -64,6 +75,17 @@ function M.open(spec)
         args = { spec }
     end
     return require("dipher.git").open(args)
+end
+
+-- Open (or toggle) the file panel over a local git change set (§8.6). `opts` are
+-- runtime, not setup config: `rev` (rev spec, string or args), `position`
+-- ("bottom"|"top"|"left"|"right"), `listing` ("tree"|"flat"), `height`, `width`.
+-- The live panel is reachable via `require("dipher.panel").current()` for runtime
+-- tweaks, e.g. `:current():set_position("left")` / `:toggle_listing()`.
+---@param opts table|nil
+---@return dipher.Panel|nil
+function M.panel(opts)
+    return require("dipher.git").panel(opts or {})
 end
 
 return M

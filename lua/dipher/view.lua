@@ -101,6 +101,24 @@ function View.current()
     return by_buf[vim.api.nvim_get_current_buf()]
 end
 
+-- Whether the view's primary window is still alive (panel uses this to decide
+-- between re-sourcing in place and opening fresh).
+---@return boolean
+function View:is_open()
+    local col = self.columns[1]
+    return col ~= nil and col.winid ~= nil and vim.api.nvim_win_is_valid(col.winid)
+end
+
+-- Swap the diffed file in place: same windows/layout/context, new model. The
+-- panel calls this when a different file is selected so the View is re-sourced,
+-- not recreated (§8.6 separation of concerns). Column count is layout-determined,
+-- so it never changes here — no relayout.
+---@param model dipher.DiffModel
+function View:set_source(model)
+    self.model = model
+    self:rerender({ layout = self.layout, context = self.context, deep_diff = self.deep_diff })
+end
+
 -- Swap the layout for this view (a pure re-render behind the map contract, §8.3).
 -- Column count changes (1 <-> 2), so re-lay the windows after.
 ---@param layout dipher.Layout

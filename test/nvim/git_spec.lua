@@ -81,6 +81,45 @@ describe("git.open_file", function()
     end)
 end)
 
+describe(":Dipher panel", function()
+    local Panel = require("dipher.panel")
+
+    it("opens a panel listing the change set and toggles closed", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({})
+        local p = Panel.current()
+        assert.is_not_nil(p)
+        assert.is_true(p:is_open())
+        assert.are.same({ "M a.lua" }, vim.api.nvim_buf_get_lines(p.bufnr, 0, -1, false))
+
+        git_src.panel({}) -- toggle
+        assert.is_nil(Panel.current())
+    end)
+
+    it("re-sources one View in place as files are selected", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        write(root .. "/z.lua", "local z = 9\n")
+        git(root, "add", "z.lua") -- z is a new (added) file in the change set
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({})
+        local p = Panel.current()
+        -- a.lua then z.lua (sorted); pick the first, then the second
+        vim.api.nvim_win_set_cursor(p.winid, { 1, 0 })
+        p:select()
+        local diff_buf = vim.api.nvim_win_get_buf(p.origin_win)
+        vim.api.nvim_win_set_cursor(p.winid, { 2, 0 })
+        p:select()
+        -- same window + buffer: the View was re-sourced, not recreated
+        assert.are.equal(diff_buf, vim.api.nvim_win_get_buf(p.origin_win))
+        p:close()
+    end)
+end)
+
 describe(":Dipher picker", function()
     -- Drive vim.ui.select deterministically: pick the entry matching `path`.
     local function with_pick(path, fn)

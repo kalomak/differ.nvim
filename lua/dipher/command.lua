@@ -49,8 +49,14 @@ function M.context(arg)
     end
 end
 
+-- :Dipher panel [revspec] — open/toggle the file panel (§8.6) over a change set.
+---@param arg string|nil
+function M.panel(arg)
+    require("dipher.git").panel({ rev = (arg ~= "" and arg) or nil })
+end
+
 ---@type table<string, fun(arg: string|nil)>
-local SUB = { layout = M.layout, context = M.context }
+local SUB = { layout = M.layout, context = M.context, panel = M.panel }
 
 -- Route `:Dipher ...`. A recognised subcommand (layout/context) takes its arg;
 -- anything else — including no args — is a local-diff rev spec (§8.1), so
