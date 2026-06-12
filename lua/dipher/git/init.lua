@@ -98,39 +98,79 @@ function M.changed_files(source, root)
     return rev.parse_name_status(out)
 end
 
--- :Dipher [revspec] — open a diff of the current file against the resolved source.
--- The changed-file picker and panel arrive in the next slices (§8.1/§8.6); this
--- MVP diffs the current buffer's file.
----@param fargs string[]
----@return dipher.View|nil
-function M.open(fargs)
-    local file = vim.api.nvim_buf_get_name(0)
-    if file == "" then
-        return notify("no file in the current buffer", vim.log.levels.WARN)
-    end
-    local root = M.root(file)
-    if not root then
-        return notify("not inside a git repository", vim.log.levels.WARN)
-    end
-    local relpath = vim.fs.relpath(root, file)
-    if not relpath then
-        return notify("current file is outside the repo root", vim.log.levels.WARN)
-    end
-
-    local source = rev.source(fargs)
+-- Resolve a source's refs to concrete revs (merge_base -> rev). Returns nil if a
+-- merge-base can't be found. Do this once per source, then open each file against
+-- the result; the picker and panel both share it.
+---@param source dipher.git.Source
+---@param root string
+---@return dipher.git.Source|nil
+function M.resolve(source, root)
     local old = resolve_ref(source.old, root)
     local new = resolve_ref(source.new, root)
     if not (old and new) then
         return nil
     end
+    return { old = old, new = new }
+end
 
+-- Open the diff for one changed file under an already-resolved source. Renames
+-- read the old side from `previous_path`; an added/deleted side reads as empty.
+---@param source dipher.git.Source -- resolved (no merge_base refs)
+---@param root string
+---@param file dipher.git.ChangedFile
+---@return dipher.View
+function M.open_file(source, root, file)
+    local old_path = file.previous_path or file.path
     return require("dipher").diff({
-        path = relpath,
-        old_rev = old.label,
-        new_rev = new.label,
-        old_text = M.read(old, root, relpath) or "",
-        new_text = M.read(new, root, relpath) or "",
+        path = file.path,
+        old_rev = source.old.label,
+        new_rev = source.new.label,
+        old_text = M.read(source.old, root, old_path) or "",
+        new_text = M.read(source.new, root, file.path) or "",
     })
+end
+
+-- The repo to operate on: the current file's repo if it's a real file, else cwd.
+---@return string|nil
+local function repo_root()
+    local file = vim.api.nvim_buf_get_name(0)
+    local anchor = (file ~= "" and vim.fn.filereadable(file) == 1) and file or vim.fn.getcwd()
+    return M.root(anchor)
+end
+
+-- A changed-file's display line for the picker: status, with rename arrow.
+---@param file dipher.git.ChangedFile
+---@return string
+local function format_item(file)
+    local name = file.previous_path and (file.previous_path .. " → " .. file.path) or file.path
+    return ("%s  %s"):format(file.status, name)
+end
+
+-- :Dipher [revspec] — the MVP changed-file picker (§8.1). Resolve the source, list
+-- its changed files, and on selection open that file's diff. The persistent file
+-- panel (§8.6) supersedes this as the primary surface but coexists with it.
+---@param fargs string[]
+function M.open(fargs)
+    local root = repo_root()
+    if not root then
+        return notify("not inside a git repository", vim.log.levels.WARN)
+    end
+    local source = M.resolve(rev.source(fargs), root)
+    if not source then
+        return
+    end
+    local files = M.changed_files(source, root)
+    if #files == 0 then
+        return notify("no changes for this source")
+    end
+    vim.ui.select(files, {
+        prompt = "Dipher — changed files",
+        format_item = format_item,
+    }, function(choice)
+        if choice then
+            M.open_file(source, root, choice)
+        end
+    end)
 end
 
 return M

@@ -1,6 +1,6 @@
 -- Runs under headless nvim against a throwaway git repo: exercises the local git
--- source end-to-end — content reads, changed-file listing, merge-base resolution,
--- and :Dipher open building a correct DiffModel for the current file.
+-- source end-to-end — content reads, changed-file listing, rename handling,
+-- merge-base resolution, and the :Dipher picker building a correct DiffModel.
 local git_src = require("dipher.git")
 local rev = require("dipher.git.rev")
 
@@ -61,13 +61,52 @@ describe("git.read / changed_files", function()
     end)
 end)
 
-describe(":Dipher open", function()
-    it("diffs the current file: HEAD vs worktree by default", function()
+describe("git.open_file", function()
+    it("reads the rename's old side from previous_path", function()
+        local root = fresh_repo()
+        git(root, "mv", "a.lua", "b.lua")
+        write(root .. "/b.lua", "local x = 2\nreturn x\n")
+        git(root, "commit", "-q", "-am", "rename + edit")
+
+        local source = assert(git_src.resolve(rev.source({ "HEAD~1", "HEAD" }), root))
+        local v = git_src.open_file(
+            source,
+            root,
+            { status = "R", path = "b.lua", previous_path = "a.lua" }
+        )
+        assert.are.equal("b.lua", v.model.path)
+        assert.are.equal(V1, v.model.old_text) -- a.lua @ HEAD~1
+        assert.are.equal("local x = 2\nreturn x\n", v.model.new_text) -- b.lua @ HEAD
+        v:close()
+    end)
+end)
+
+describe(":Dipher picker", function()
+    -- Drive vim.ui.select deterministically: pick the entry matching `path`.
+    local function with_pick(path, fn)
+        local orig = vim.ui.select
+        vim.ui.select = function(items, _, on_choice)
+            for _, it in ipairs(items) do
+                if it.path == path then
+                    return on_choice(it)
+                end
+            end
+            return on_choice(nil)
+        end
+        local ok, err = pcall(fn)
+        vim.ui.select = orig
+        assert(ok, err)
+    end
+
+    it("opens the picked file's diff: HEAD vs worktree by default", function()
         local root = fresh_repo()
         write(root .. "/a.lua", "local x = 2\nreturn x\n")
         vim.cmd.edit(root .. "/a.lua")
 
-        local v = git_src.open({})
+        with_pick("a.lua", function()
+            git_src.open({})
+        end)
+        local v = require("dipher.view").current()
         assert.is_not_nil(v)
         assert.are.equal("a.lua", v.model.path)
         assert.are.equal(V1, v.model.old_text)
@@ -85,7 +124,10 @@ describe(":Dipher open", function()
         vim.cmd.edit(root .. "/a.lua")
 
         -- main... => merge-base(main, HEAD) [the init commit, V1] vs worktree [V3]
-        local v = git_src.open({ "main..." })
+        with_pick("a.lua", function()
+            git_src.open({ "main..." })
+        end)
+        local v = require("dipher.view").current()
         assert.is_not_nil(v)
         assert.are.equal(V1, v.model.old_text)
         assert.are.equal("local x = 3\nreturn x\n", v.model.new_text)
