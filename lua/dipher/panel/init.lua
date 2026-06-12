@@ -1,10 +1,10 @@
--- File panel (§8.6): the persistent sidebar listing a change set. Source-agnostic
--- by design — it renders FileEntry sections, owns fold/listing state and the
--- window, and calls `on_select(entry)` when a file is chosen. The local frontend
+-- file panel (§8.6): the persistent sidebar listing a change set. source-agnostic
+-- by design: it renders FileEntry sections, owns fold/listing state and the
+-- window, and calls `on_select(entry)` when a file is chosen. the local frontend
 -- feeds it git changes (phase 2); the PR frontend reuses it verbatim (phase 4),
--- only swapping the model source. It owns *which file*; the View owns *how it
+-- only swapping the model source. it owns *which file*; the View owns *how it
 -- renders*, so selecting a file re-sources the existing View (separation of
--- concerns, §8.6). Pure tree/line logic lives in panel/tree.lua + panel/render.lua.
+-- concerns, §8.6). pure tree/line logic lives in panel/tree.lua + panel/render.lua
 
 local tree = require("dipher.panel.tree")
 local render = require("dipher.panel.render")
@@ -13,6 +13,21 @@ local ns = vim.api.nvim_create_namespace("dipher.panel")
 
 ---@type dipher.Panel|nil -- the live panel, for runtime API (Panel.current())
 local current = nil
+
+-- a `(glyph, hl)` provider backed by nvim-web-devicons, or nil when it's absent
+-- (icons degrade away cleanly). resolved once per panel
+---@return nil|fun(path: string): string|nil, string|nil
+local function devicon_provider()
+    local ok, devicons = pcall(require, "nvim-web-devicons")
+    if not ok then
+        return nil
+    end
+    return function(path)
+        local name = path:match("[^/]+$") or path
+        local ext = name:match("%.([^.]+)$")
+        return devicons.get_icon(name, ext, { default = true })
+    end
+end
 
 ---@type table<string, string>
 local STATUS_HL = {
@@ -37,6 +52,9 @@ local STATUS_HL = {
 ---@field listing "tree"|"flat"
 ---@field collapsed table<string, boolean>
 ---@field on_select fun(entry: dipher.FileEntry)
+---@field on_close fun()|nil
+---@field root string|nil
+---@field icon_for nil|fun(path: string): string|nil, string|nil
 ---@field position string
 ---@field height integer
 ---@field width integer
@@ -48,20 +66,23 @@ Panel.__index = Panel
 ---@class dipher.panel.Opts
 ---@field sections dipher.panel.Section[]
 ---@field on_select fun(entry: dipher.FileEntry)
+---@field on_close? fun()  -- runs on :close (e.g. tear down the driven view)
+---@field root? string  -- repo/worktree path shown in the panel header
+---@field icons? boolean -- filetype devicons (default true when available)
 ---@field listing? "tree"|"flat"
 ---@field position? "bottom"|"top"|"left"|"right"
 ---@field height? integer
 ---@field width? integer
 
--- Build a panel (buffer only; the window is created on :open, so it's headless-
--- constructible for tests).
+-- build a panel (buffer only; the window is created on :open, so it's headless-
+-- constructible for tests)
 ---@param opts dipher.panel.Opts
 ---@return dipher.Panel
 function Panel.new(opts)
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.bo[bufnr].buftype = "nofile"
     -- "hide", not "wipe": set_position closes + reopens the window, and the panel
-    -- owns the buffer's lifecycle explicitly via :close().
+    -- owns the buffer's lifecycle explicitly via :close()
     vim.bo[bufnr].bufhidden = "hide"
     vim.bo[bufnr].swapfile = false
     vim.bo[bufnr].filetype = "dipherpanel"
@@ -70,6 +91,9 @@ function Panel.new(opts)
         bufnr = bufnr,
         sections = opts.sections,
         on_select = opts.on_select,
+        on_close = opts.on_close,
+        root = opts.root,
+        icon_for = opts.icons ~= false and devicon_provider() or nil,
         listing = opts.listing or "tree",
         position = opts.position or "bottom",
         height = opts.height or 10,
@@ -80,7 +104,7 @@ function Panel.new(opts)
     }, Panel)
 end
 
--- 1-based line of the first file row, or 1 if there are none.
+-- 1-based line of the first file row, or 1 if there are none
 ---@return integer
 function Panel:_first_file_line()
     for i, m in ipairs(self.meta) do
@@ -91,8 +115,8 @@ function Panel:_first_file_line()
     return 1
 end
 
--- Re-flatten the sections (honouring listing + fold state) and repaint the
--- buffer. Cursor line is preserved across re-renders (clamped).
+-- re-flatten the sections (honouring listing + fold state) and repaint the
+-- buffer. cursor line is preserved across re-renders (clamped)
 function Panel:render()
     local blocks = {}
     for _, sec in ipairs(self.sections) do
@@ -100,7 +124,8 @@ function Panel:render()
         blocks[#blocks + 1] =
             { title = sec.title, rows = tree.rows(root, self.listing, self.collapsed) }
     end
-    local out = render.lines(blocks)
+    local header = self.root and { path = self.root, help = "g?" } or nil
+    local out = render.lines(blocks, header, self.icon_for)
     self.lines, self.meta = out.lines, out.meta
 
     vim.bo[self.bufnr].modifiable = true
@@ -109,13 +134,29 @@ function Panel:render()
     self:_highlight()
 end
 
--- Paint section/dir/status highlights from the line metadata.
+-- paint section/dir/status highlights from the line metadata
 function Panel:_highlight()
     vim.api.nvim_buf_clear_namespace(self.bufnr, ns, 0, -1)
     for i, m in ipairs(self.meta) do
         local row = i - 1
         local eol = #self.lines[i]
-        if m.kind == "header" then
+        if m.kind == "root" then
+            vim.api.nvim_buf_set_extmark(
+                self.bufnr,
+                ns,
+                row,
+                0,
+                { end_col = eol, hl_group = "dipherPanelRoot" }
+            )
+        elseif m.kind == "help" then
+            vim.api.nvim_buf_set_extmark(
+                self.bufnr,
+                ns,
+                row,
+                0,
+                { end_col = eol, hl_group = "dipherPanelHelp" }
+            )
+        elseif m.kind == "header" then
             vim.api.nvim_buf_set_extmark(
                 self.bufnr,
                 ns,
@@ -142,6 +183,15 @@ function Panel:_highlight()
                     { end_col = m.status_col + #m.status, hl_group = hl }
                 )
             end
+            if m.icon_col and m.icon_hl then
+                vim.api.nvim_buf_set_extmark(
+                    self.bufnr,
+                    ns,
+                    row,
+                    m.icon_col,
+                    { end_col = m.icon_end, hl_group = m.icon_hl }
+                )
+            end
             if m.add_col then
                 vim.api.nvim_buf_set_extmark(
                     self.bufnr,
@@ -162,14 +212,14 @@ function Panel:_highlight()
     end
 end
 
--- Replace the file-list model and repaint (used on refresh / source change).
+-- replace the file-list model and repaint (used on refresh / source change)
 ---@param sections dipher.panel.Section[]
 function Panel:set_sections(sections)
     self.sections = sections
     self:render()
 end
 
--- Toggle the fold state of a directory path and repaint, keeping the cursor put.
+-- toggle the fold state of a directory path and repaint, keeping the cursor put
 ---@param path string
 function Panel:toggle_fold(path)
     self.collapsed[path] = not self.collapsed[path]
@@ -180,8 +230,8 @@ function Panel:toggle_fold(path)
     end
 end
 
--- A non-panel window to open diffs in: the origin window if still valid, else any
--- other window, else a fresh split carved off the panel.
+-- a non-panel window to open diffs in: the origin window if still valid, else any
+-- other window, else a fresh split carved off the panel
 ---@return integer
 function Panel:_ensure_origin()
     if
@@ -203,18 +253,20 @@ function Panel:_ensure_origin()
     return self.origin_win
 end
 
--- Open `entry`'s diff in the main window, then return focus to the panel so file
--- browsing keeps flowing.
+-- open `entry`'s diff in the main window. by default focus returns to the panel so
+-- file browsing keeps flowing; `keep_focus` leaves it in the diff window (used when
+-- stepping files from inside the diff via `]f`/`[f`)
 ---@param entry dipher.FileEntry
-function Panel:_open(entry)
+---@param keep_focus boolean|nil
+function Panel:_open(entry, keep_focus)
     vim.api.nvim_set_current_win(self:_ensure_origin())
     self.on_select(entry)
-    if self.winid and vim.api.nvim_win_is_valid(self.winid) then
+    if not keep_focus and self.winid and vim.api.nvim_win_is_valid(self.winid) then
         vim.api.nvim_set_current_win(self.winid)
     end
 end
 
--- <CR>/o: open a file, or toggle a directory's fold.
+-- <CR>/o: open a file, or toggle a directory's fold
 function Panel:select()
     local m = self.meta[vim.api.nvim_win_get_cursor(self.winid)[1]]
     if not m then
@@ -228,8 +280,10 @@ function Panel:select()
 end
 
 -- ]f / [f: move to the next/prev file row and open it (lockstep file stepping).
+-- `keep_focus` is threaded to `_open` so in-view stepping stays in the diff window
 ---@param direction "next"|"prev"
-function Panel:goto_file(direction)
+---@param keep_focus boolean|nil
+function Panel:goto_file(direction, keep_focus)
     local lnum = vim.api.nvim_win_get_cursor(self.winid)[1]
     local from, to, step = lnum + 1, #self.meta, 1
     if direction == "prev" then
@@ -239,13 +293,51 @@ function Panel:goto_file(direction)
         local m = self.meta[i]
         if m and m.kind == "file" then
             vim.api.nvim_win_set_cursor(self.winid, { i, 0 })
-            self:_open(m.entry)
+            self:_open(m.entry, keep_focus)
             return
         end
     end
 end
 
--- Window appearance + buffer-local keymaps.
+-- g?: a floating keymap cheatsheet, dismissed with <Esc> / g?
+function Panel:show_help()
+    local lines = {
+        " dipher panel",
+        "",
+        " <CR> / o   open file / toggle fold",
+        " ]f / [f    next / previous file",
+        " za         toggle fold",
+        " g?         this help",
+    }
+    local width = 0
+    for _, l in ipairs(lines) do
+        width = math.max(width, #l)
+    end
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+    vim.bo[buf].bufhidden = "wipe"
+    local win = vim.api.nvim_open_win(buf, true, {
+        relative = "editor",
+        width = width + 1,
+        height = #lines,
+        row = math.floor((vim.o.lines - #lines) / 2),
+        col = math.floor((vim.o.columns - width) / 2),
+        style = "minimal",
+        border = "rounded",
+        title = " Dipher ",
+    })
+    local function close()
+        if vim.api.nvim_win_is_valid(win) then
+            pcall(vim.api.nvim_win_close, win, true)
+        end
+    end
+    for _, lhs in ipairs({ "q", "<Esc>", "g?" }) do
+        vim.keymap.set("n", lhs, close, { buffer = buf, nowait = true })
+    end
+end
+
+-- window appearance + buffer-local keymaps
 function Panel:_setup_window()
     local win = self.winid
     vim.wo[win].number = false
@@ -286,12 +378,12 @@ function Panel:_setup_window()
             self:toggle_fold(m.path)
         end
     end, "toggle fold")
-    map("q", function()
-        self:close()
-    end, "close panel")
+    map("g?", function()
+        self:show_help()
+    end, "help")
 end
 
--- Create the split in the configured position, bind the buffer, set window opts.
+-- create the split in the configured position, bind the buffer, set window opts
 function Panel:_open_window()
     if self.position == "top" then
         vim.cmd(("topleft %dsplit"):format(self.height))
@@ -307,7 +399,7 @@ function Panel:_open_window()
     self:_setup_window()
 end
 
--- Close the panel window but keep the buffer + state (for re-positioning).
+-- close the panel window but keep the buffer + state (for re-positioning)
 function Panel:_close_window()
     if self:is_open() then
         pcall(vim.api.nvim_win_close, self.winid, true)
@@ -315,7 +407,7 @@ function Panel:_close_window()
     self.winid = nil
 end
 
--- Open the panel in its position and focus it.
+-- open the panel in its position and focus it
 ---@return dipher.Panel
 function Panel:open()
     self.origin_win = vim.api.nvim_get_current_win()
@@ -331,7 +423,7 @@ function Panel:is_open()
     return self.winid ~= nil and vim.api.nvim_win_is_valid(self.winid)
 end
 
--- Restore the cursor line after a re-render/reposition (clamped to the content).
+-- restore the cursor line after a re-render/reposition (clamped to the content)
 ---@param lnum integer
 function Panel:_restore_cursor(lnum)
     if self:is_open() then
@@ -343,9 +435,9 @@ function Panel:_restore_cursor(lnum)
     end
 end
 
--- Runtime API (§8.3-style per-view control, not setup config) ----------------
+-- runtime API (§8.3-style per-view control, not setup config) ----------------
 
--- Switch tree <-> flat listing live.
+-- switch tree <-> flat listing live
 ---@param listing "tree"|"flat"
 function Panel:set_listing(listing)
     self.listing = listing
@@ -360,8 +452,8 @@ function Panel:toggle_listing()
     self:set_listing(self.listing == "tree" and "flat" or "tree")
 end
 
--- Move the panel to a new position live, preserving the buffer, fold state, and
--- the main (origin) window.
+-- move the panel to a new position live, preserving the buffer, fold state, and
+-- the main (origin) window
 ---@param position "bottom"|"top"|"left"|"right"
 function Panel:set_position(position)
     self.position = position
@@ -380,7 +472,8 @@ function Panel:set_position(position)
     self:_restore_cursor(lnum)
 end
 
--- Close the panel window and wipe its buffer.
+-- close the panel window and wipe its buffer. `on_close` (if set) tears down the
+-- diff view the panel drives, so closing the panel ends the whole dipher session
 function Panel:close()
     self:_close_window()
     if vim.api.nvim_buf_is_valid(self.bufnr) then
@@ -389,9 +482,12 @@ function Panel:close()
     if current == self then
         current = nil
     end
+    if self.on_close then
+        self.on_close()
+    end
 end
 
--- The live panel, if one is open — the entry point for the runtime API.
+-- the live panel, if one is open: the entry point for the runtime API
 ---@return dipher.Panel|nil
 function Panel.current()
     return current

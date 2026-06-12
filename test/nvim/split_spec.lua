@@ -1,5 +1,5 @@
--- Runs under headless nvim: feeds real vim.text.diff output through the split
--- renderer and asserts both columns stay aligned and each side's map round-trips.
+-- runs under headless nvim: feeds real vim.text.diff output through the split
+-- renderer and asserts both columns stay aligned and each side's map round-trips
 local diff = require("dipher.model.diff")
 local split = require("dipher.render.split")
 local text_util = require("dipher.util.text")
@@ -14,7 +14,7 @@ local function build(old_text, new_text)
     })
 end
 
--- Split renders two columns; expose them under old_*/new_* for the assertions.
+-- split renders two columns; expose them under old_*/new_* for the assertions
 local function render(model, opts)
     local r = split.render(model, opts)
     return {
@@ -25,8 +25,8 @@ local function render(model, opts)
     }
 end
 
--- Under full context every source line is rendered; from_old/from_new must resolve
--- to a row whose column content matches the source, and the columns stay aligned.
+-- under full context every source line is rendered; from_old/from_new must resolve
+-- to a row whose column content matches the source, and the columns stay aligned
 local function assert_roundtrip(old_text, new_text)
     local model = build(old_text, new_text)
     local r = render(model, { context = math.huge })

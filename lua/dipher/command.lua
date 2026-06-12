@@ -1,5 +1,5 @@
--- :Dipher subcommand router. Phase 1 wires the runtime view controls (§8.3);
--- diff/pr/log/mergetool subcommands arrive with their frontends (phases 2+).
+-- :Dipher subcommand router. phase 1 wires the runtime view controls (§8.3);
+-- diff/pr/log/mergetool subcommands arrive with their frontends (phases 2+)
 
 local View = require("dipher.view")
 
@@ -11,7 +11,7 @@ local function notify(msg, level)
     vim.notify("dipher: " .. msg, level or vim.log.levels.INFO)
 end
 
--- :Dipher layout [stacked|split] — no arg flips the current view's layout.
+-- :Dipher layout [stacked|split], no arg flips the current view's layout
 ---@param arg string|nil
 function M.layout(arg)
     local view = View.current()
@@ -27,7 +27,7 @@ function M.layout(arg)
     end
 end
 
--- :Dipher context <n|full|+|-> — sets/adjusts the per-view context lines.
+-- :Dipher context <n|full|+|->, sets/adjusts the per-view context lines
 ---@param arg string|nil
 function M.context(arg)
     local view = View.current()
@@ -49,20 +49,25 @@ function M.context(arg)
     end
 end
 
--- :Dipher panel [revspec] — open/toggle the file panel (§8.6) over a change set,
--- without auto-selecting a file (bare `:Dipher` is the open-and-show entry).
+-- :Dipher panel [revspec], open/toggle the file panel (§8.6) over a change set,
+-- without auto-selecting a file (bare `:Dipher` is the open-and-show entry)
 ---@param arg string|nil
 function M.panel(arg)
     require("dipher.git").panel({ rev = (arg ~= "" and arg) or nil })
 end
 
----@type table<string, fun(arg: string|nil)>
-local SUB = { layout = M.layout, context = M.context, panel = M.panel }
+-- :Dipher close: close the panel + diff view (the whole local session)
+function M.close()
+    require("dipher.git").close()
+end
 
--- Route `:Dipher ...`. A recognised subcommand (layout/context/panel) takes its
--- arg; anything else — including no args — is a local-diff rev spec (§8.1), so
+---@type table<string, fun(arg: string|nil)>
+local SUB = { layout = M.layout, context = M.context, panel = M.panel, close = M.close }
+
+-- route `:Dipher ...`. a recognised subcommand (layout/context/panel) takes its
+-- arg; anything else, including no args, is a local-diff rev spec (§8.1), so
 -- `:Dipher`, `:Dipher main...`, `:Dipher a..b` open the file panel over that
--- change set and show the first file's diff (DiffviewOpen-style).
+-- change set and show the first file's diff (DiffviewOpen-style)
 ---@param fargs string[]
 function M.dispatch(fargs)
     local handler = fargs[1] and SUB[fargs[1]]
@@ -75,7 +80,7 @@ end
 ---@type table<string, string[]>
 local VALUES = { layout = { "stacked", "split" }, context = { "full", "+", "-" } }
 
--- Completion: subcommands at position 1, then that subcommand's value set.
+-- completion: subcommands at position 1, then that subcommand's value set
 ---@param arglead string
 ---@param cmdline string
 ---@return string[]

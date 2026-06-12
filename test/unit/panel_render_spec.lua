@@ -6,6 +6,19 @@ local function entry(path, status, add, del)
 end
 
 describe("panel.render.lines", function()
+    it("prefixes a header (root path + Help + blank) when given one", function()
+        local root = tree.build({ entry("a.lua") })
+        local out = render.lines(
+            { { title = "Changes", rows = tree.rows(root, "tree", {}) } },
+            { path = "~/repo", help = "g?" }
+        )
+        assert.are.same({ "~/repo", "Help: g?", "", "Changes (1)", "M a.lua" }, out.lines)
+        assert.are.equal("root", out.meta[1].kind)
+        assert.are.equal("help", out.meta[2].kind)
+        assert.are.equal("blank", out.meta[3].kind)
+        assert.are.equal("header", out.meta[4].kind)
+    end)
+
     it("renders a section header with the file count", function()
         local root = tree.build({ entry("a.lua"), entry("b.lua") })
         local out = render.lines({ { title = "Unstaged", rows = tree.rows(root, "tree", {}) } })
@@ -38,6 +51,19 @@ describe("panel.render.lines", function()
         local root = tree.build({ entry("a.lua", "M", 0, 0) })
         local out = render.lines({ { rows = tree.rows(root, "tree", {}) } })
         assert.is_nil(out.meta[1].add_col)
+    end)
+
+    it("paints a devicon between the status letter and the name", function()
+        local root = tree.build({ entry("a.lua", "M", 3, 1) })
+        local icon_for = function()
+            return ">", "DevIconLua"
+        end
+        local out = render.lines({ { rows = tree.rows(root, "tree", {}) } }, nil, icon_for)
+        assert.are.equal("M > a.lua  +3 -1", out.lines[1])
+        local m = out.meta[1]
+        assert.are.equal("DevIconLua", m.icon_hl)
+        assert.are.equal(">", out.lines[1]:sub(m.icon_col + 1, m.icon_end))
+        assert.are.equal("a.lua", out.lines[1]:sub(m.name_col + 1, m.name_col + 5))
     end)
 
     it("renders a collapsed dir with a closed fold arrow and trailing slash", function()

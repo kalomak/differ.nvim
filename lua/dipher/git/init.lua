@@ -1,16 +1,16 @@
--- Local git source: the runtime half of the diff source layer (§8.1). Resolves a
+-- local git source: the runtime half of the diff source layer (§8.1). resolves a
 -- repo, turns a rev spec (rev.lua) into concrete old/new content, and opens a
--- View. Local diffs are fast and offline, so reads run synchronously here — the
+-- view. local diffs are fast and offline, so reads run synchronously here: the
 -- latency discipline (§7.5) is about the PR sidecar hot path, not local git.
--- Pure parsing/grammar lives in git/rev.lua; this module only does I/O + wiring.
+-- pure parsing/grammar lives in git/rev.lua; this module only does I/O + wiring
 
 local rev = require("dipher.git.rev")
 
 local M = {}
 
--- The three working-tree side refs (§8.6 slice B). Staged diffs read HEAD↔index,
+-- the three working-tree side refs (§8.6 slice B). staged diffs read HEAD↔index,
 -- unstaged diffs read index↔worktree; an untracked file is absent from the index
--- so its index read returns nil and the diff renders as a pure add.
+-- so its index read returns nil and the diff renders as a pure add
 local HEAD = { kind = "rev", rev = "HEAD", label = "HEAD" }
 local INDEX = { kind = "index", label = "INDEX" }
 local WORKTREE = { kind = "worktree", label = "WORKTREE" }
@@ -21,7 +21,7 @@ local function notify(msg, level)
     vim.notify("dipher: " .. msg, level or vim.log.levels.INFO)
 end
 
--- Run git in `cwd`. Returns stdout on success, or nil + stderr on failure.
+-- run git in `cwd`. returns stdout on success, or nil + stderr on failure
 ---@param args string[]
 ---@param cwd string
 ---@return string|nil stdout, string|nil stderr
@@ -39,7 +39,7 @@ local function chomp(s)
     return (s:gsub("%s+$", ""))
 end
 
--- Repo root containing `path` (a file or directory), or nil if not in a repo.
+-- repo root containing `path` (a file or directory), or nil if not in a repo
 ---@param path string
 ---@return string|nil
 function M.root(path)
@@ -48,8 +48,8 @@ function M.root(path)
     return out and chomp(out) or nil
 end
 
--- Resolve an unresolved merge_base ref to a concrete rev; other refs pass through.
--- Returns nil on failure (e.g. unrelated histories), with a notification.
+-- resolve an unresolved merge_base ref to a concrete rev; other refs pass through.
+-- returns nil on failure (e.g. unrelated histories), with a notification
 ---@param ref dipher.git.Ref
 ---@param root string
 ---@return dipher.git.Ref|nil
@@ -65,9 +65,9 @@ local function resolve_ref(ref, root)
     return { kind = "rev", rev = chomp(out), label = ref.label }
 end
 
--- Read a side's content for `relpath` (repo-root-relative). Returns the content
--- (possibly ""), or nil when the file is absent on that side (added/deleted) —
--- callers treat nil as an empty file so the diff renders an add/delete.
+-- read a side's content for `relpath` (repo-root-relative). returns the content
+-- (possibly ""), or nil when the file is absent on that side (added/deleted);
+-- callers treat nil as an empty file so the diff renders an add/delete
 ---@param ref dipher.git.Ref
 ---@param root string
 ---@param relpath string
@@ -91,7 +91,7 @@ function M.read(ref, root, relpath)
     return git({ "show", spec }, root) -- nil if the path is absent in that tree
 end
 
--- List changed files for a resolved source (used by the picker/panel, §8.6).
+-- list changed files for a resolved source (used by the picker/panel, §8.6)
 ---@param source dipher.git.Source
 ---@param root string
 ---@return dipher.git.ChangedFile[]
@@ -105,9 +105,9 @@ function M.changed_files(source, root)
     return rev.parse_name_status(out)
 end
 
--- Resolve a source's refs to concrete revs (merge_base -> rev). Returns nil if a
--- merge-base can't be found. Do this once per source, then open each file against
--- the result; the picker and panel both share it.
+-- resolve a source's refs to concrete revs (merge_base -> rev). returns nil if a
+-- merge-base can't be found. do this once per source, then open each file against
+-- the result; the picker and panel both share it
 ---@param source dipher.git.Source
 ---@param root string
 ---@return dipher.git.Source|nil
@@ -120,8 +120,8 @@ function M.resolve(source, root)
     return { old = old, new = new }
 end
 
--- Build a DiffModel for one changed file under an already-resolved source.
--- Renames read the old side from `previous_path`; an absent side reads as empty.
+-- build a DiffModel for one changed file under an already-resolved source.
+-- renames read the old side from `previous_path`; an absent side reads as empty
 ---@param source dipher.git.Source -- resolved (no merge_base refs)
 ---@param root string
 ---@param file dipher.git.ChangedFile|dipher.FileEntry
@@ -137,7 +137,7 @@ function M.model(source, root, file)
     })
 end
 
--- Open the diff for one changed file under an already-resolved source.
+-- open the diff for one changed file under an already-resolved source
 ---@param source dipher.git.Source
 ---@param root string
 ---@param file dipher.git.ChangedFile
@@ -146,8 +146,8 @@ function M.open_file(source, root, file)
     return require("dipher").diff_model(M.model(source, root, file))
 end
 
--- Parse a `git diff --numstat -z [...]` run into a path -> counts map. Returns an
--- empty map on git failure so callers degrade to zeroed counts.
+-- parse a `git diff --numstat -z [...]` run into a path -> counts map. returns an
+-- empty map on git failure so callers degrade to zeroed counts
 ---@param args string[] -- extra args after `diff --numstat -z`
 ---@param root string
 ---@return table<string, { additions: integer, deletions: integer }>
@@ -157,8 +157,8 @@ local function numstat(args, root)
     return rev.parse_numstat(git(full, root) or "")
 end
 
--- The change set as panel FileEntry records — one flat list with `+N -M` counts,
--- used for rev-pair sources. Working-tree sources use status_sections instead.
+-- the change set as panel FileEntry records: one flat list with `+N -M` counts,
+-- used for rev-pair sources. working-tree sources use status_sections instead
 ---@param source dipher.git.Source -- resolved
 ---@param root string
 ---@return dipher.FileEntry[]
@@ -178,12 +178,12 @@ function M.file_entries(source, root)
     return out
 end
 
--- Working-tree status as panel sections — Staged / Unstaged / Untracked (§8.6
+-- working-tree status as panel sections: Staged / Unstaged / Untracked (§8.6
 -- slice B). git status compares HEAD/index/worktree, so it only models the
 -- default HEAD-vs-worktree source; rev-pair sources use file_entries instead.
--- A file edited in both index and worktree (e.g. "MM") appears in both Staged
+-- a file edited in both index and worktree (e.g. "MM") appears in both Staged
 -- (X status, HEAD↔index counts) and Unstaged (Y status, index↔worktree counts).
--- Empty sections are dropped by the caller.
+-- empty sections are dropped by the caller
 ---@param root string
 ---@return dipher.panel.Section[]
 function M.status_sections(root)
@@ -197,7 +197,7 @@ function M.status_sections(root)
                 { path = s.path, status = "?", additions = 0, deletions = 0, staged = false }
         else
             -- previous_path only belongs to whichever side carries the rename:
-            -- an "RM" file is renamed HEAD↔index but plain-modified index↔worktree.
+            -- an "RM" file is renamed HEAD↔index but plain-modified index↔worktree
             if s.x ~= " " then
                 local c = staged_counts[s.path] or {}
                 staged[#staged + 1] = {
@@ -229,7 +229,7 @@ function M.status_sections(root)
     }
 end
 
--- The repo to operate on: the current file's repo if it's a real file, else cwd.
+-- the repo to operate on: the current file's repo if it's a real file, else cwd
 ---@return string|nil
 local function repo_root()
     local file = vim.api.nvim_buf_get_name(0)
@@ -237,20 +237,20 @@ local function repo_root()
     return M.root(anchor)
 end
 
--- True when `source` is the default HEAD-vs-worktree view — the only source git
--- status can model as Staged/Unstaged/Untracked sections (§8.6 slice B). Rev-pair
--- and merge-base sources (old is a sha, not HEAD) stay a single counted list.
+-- true when `source` is the default HEAD-vs-worktree view: the only source git
+-- status can model as Staged/Unstaged/Untracked sections (§8.6 slice B). rev-pair
+-- and merge-base sources (old is a sha, not HEAD) stay a single counted list
 ---@param source dipher.git.Source -- resolved
 ---@return boolean
 local function is_worktree_status(source)
     return source.old.kind == "rev" and source.old.rev == "HEAD" and source.new.kind == "worktree"
 end
 
--- :Dipher panel — open (or toggle) the file panel (§8.6) over a git change set.
--- Selecting a file re-sources the one View in place rather than spawning a new
+-- :Dipher panel: open (or toggle) the file panel (§8.6) over a git change set.
+-- selecting a file re-sources the one View in place rather than spawning a new
 -- one. `opts.rev` is the rev spec; position/listing/height/width pass through to
 -- the panel and are runtime-adjustable via Panel.current(). `opts.open_first`
--- selects the first file straight away (DiffviewOpen-style: bare `:Dipher`).
+-- selects the first file straight away (DiffviewOpen-style: bare `:Dipher`)
 ---@class dipher.git.PanelOpts
 ---@field rev? string|string[]
 ---@field position? string
@@ -280,7 +280,7 @@ function M.panel(opts)
 
     -- model_for picks the (old, new) pair per entry: working-tree sections diff by
     -- the entry's staged flag (staged = HEAD↔index, else index↔worktree), while a
-    -- rev-pair list diffs every entry against the one resolved source.
+    -- rev-pair list diffs every entry against the one resolved source
     local sections, model_for
     if is_worktree_status(source) then
         sections = M.status_sections(root)
@@ -290,13 +290,13 @@ function M.panel(opts)
             return M.model(s, root, entry)
         end
     else
-        sections = { { title = nil, entries = M.file_entries(source, root) } }
+        sections = { { title = "Changes", entries = M.file_entries(source, root) } }
         model_for = function(entry)
             return M.model(source, root, entry)
         end
     end
 
-    -- Drop empty sections so the panel never shows a bare "Staged (0)" header.
+    -- drop empty sections so the panel never shows a bare "Staged (0)" header
     local nonempty, total = {}, 0
     for _, sec in ipairs(sections) do
         if #sec.entries > 0 then
@@ -311,6 +311,7 @@ function M.panel(opts)
     local view ---@type dipher.View|nil -- the single diff view the panel drives
     local panel = Panel.new({
         sections = nonempty,
+        root = vim.fn.fnamemodify(root, ":~"), -- ~-relative repo path for the header
         listing = opts.listing,
         position = opts.position,
         height = opts.height,
@@ -323,11 +324,30 @@ function M.panel(opts)
                 view = require("dipher").diff_model(model)
             end
         end,
+        on_close = function()
+            if view and view:is_open() then
+                view:close()
+            end
+        end,
     }):open()
     if opts.open_first then
         panel:select() -- cursor sits on the first file row after :open
     end
     return panel
+end
+
+-- :Dipher close: tear down the whole local session: the panel (which closes the
+-- diff view it drives via on_close) or, failing that, a bare diff view
+function M.close()
+    local panel = require("dipher.panel").current()
+    if panel then
+        return panel:close()
+    end
+    local view = require("dipher.view").current()
+    if view then
+        return view:close()
+    end
+    notify("no dipher view open")
 end
 
 return M

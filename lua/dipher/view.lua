@@ -1,8 +1,8 @@
--- View lifecycle: own one derived buffer per render column, lay them into windows
+-- view lifecycle: own one derived buffer per render column, lay them into windows
 -- (one for stacked, a scroll-bound pair for split), and hold each column's map.
--- Buffers + maps are regenerated atomically on re-render; the gutter rail, the
+-- buffers + maps are regenerated atomically on re-render; the gutter rail, the
 -- diff highlight layer, and the treesitter syntax pass (§6.5) are refreshed from
--- the map; overlays are extmark-only.
+-- the map; overlays are extmark-only
 
 local render = require("dipher.render")
 local paint = require("dipher.ui.paint")
@@ -12,6 +12,8 @@ local nav = require("dipher.nav")
 
 local ns = vim.api.nvim_create_namespace("dipher")
 local STATUSCOLUMN_EXPR = '%!v:lua.require("dipher.ui.statuscolumn").render()'
+local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
+local CTRL_U = vim.api.nvim_replace_termcodes("<C-u>", true, false, true)
 
 ---@type table<integer, dipher.View> -- bufnr -> owning view, for command dispatch
 local by_buf = {}
@@ -28,13 +30,14 @@ local by_buf = {}
 ---@field layout dipher.Layout
 ---@field context integer
 ---@field deep_diff table
+---@field keymaps table
 local View = {}
 View.__index = View
 
--- Build a view for a model. Buffers and data are created here; windows are not
--- touched until :open(), so a View can be constructed headlessly for tests.
+-- build a view for a model. buffers and data are created here; windows are not
+-- touched until :open(), so a View can be constructed headlessly for tests
 ---@param model dipher.DiffModel
----@param opts { layout: dipher.Layout, context: integer, deep_diff: table }
+---@param opts { layout: dipher.Layout, context: integer, deep_diff: table, keymaps?: table }
 ---@return dipher.View
 function View.new(model, opts)
     local self = setmetatable({
@@ -43,13 +46,38 @@ function View.new(model, opts)
         layout = opts.layout,
         context = opts.context,
         deep_diff = opts.deep_diff,
+        keymaps = opts.keymaps or {},
     }, View)
     self:rerender(opts)
     return self
 end
 
--- The map for a side, or the unified map. Consumers (]c, staging, comment
--- anchoring) read this rather than branching on layout themselves.
+-- a stable, file-shaped buffer name so the statusline/winbar shows the file + revs
+-- instead of `[Scratch]` (§8.1). the `dipher://` scheme + nofile buftype keep it
+-- non-editable; the side segment keeps a split's two columns distinct, and the
+-- path stays last so `:t` resolves to the real basename
+---@param model dipher.DiffModel
+---@param side dipher.ColumnSide
+---@return string
+local function buf_name(model, side)
+    local revs = ("%s..%s"):format(model.old_rev or "OLD", model.new_rev or "NEW")
+    return ("dipher://%s/%s/%s"):format(revs, side, model.path)
+end
+
+-- name `bufnr` for `side`, falling back to a bufnr-suffixed name if that exact
+-- name is somehow already taken (E95), e.g. a second concurrent view
+---@param bufnr integer
+---@param model dipher.DiffModel
+---@param side dipher.ColumnSide
+local function name_buffer(bufnr, model, side)
+    local name = buf_name(model, side)
+    if not pcall(vim.api.nvim_buf_set_name, bufnr, name) then
+        pcall(vim.api.nvim_buf_set_name, bufnr, name .. "#" .. bufnr)
+    end
+end
+
+-- the map for a side, or the unified map. consumers (]c, staging, comment
+-- anchoring) read this rather than branching on layout themselves
 ---@param side dipher.ColumnSide
 ---@return dipher.LineMap|nil
 function View:map_for(side)
@@ -61,9 +89,9 @@ function View:map_for(side)
     return nil
 end
 
--- Re-render the active model and atomically replace each column's content, map,
--- gutter rail, and highlight layer. Window layout is unchanged; if a re-render
--- changes the column count (a layout toggle), call :open() to relayout.
+-- re-render the active model and atomically replace each column's content, map,
+-- gutter rail, and highlight layer. window layout is unchanged; if a re-render
+-- changes the column count (a layout toggle), call :open() to relayout
 ---@param opts { layout: dipher.Layout, context: integer, deep_diff: table }
 function View:rerender(opts)
     self.layout = opts.layout
@@ -74,6 +102,7 @@ function View:rerender(opts)
     for i, col in ipairs(result.columns) do
         local existing = self.columns[i]
         local bufnr = existing and existing.bufnr or vim.api.nvim_create_buf(false, true)
+        name_buffer(bufnr, self.model, col.side)
         vim.bo[bufnr].modifiable = true
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, col.lines)
         vim.bo[bufnr].modifiable = false
@@ -88,39 +117,39 @@ function View:rerender(opts)
         }
         by_buf[bufnr] = self
     end
-    -- Shrinking column count (split -> stacked): drop the surplus buffers/windows.
+    -- shrinking column count (split -> stacked): drop the surplus buffers/windows
     for i = #result.columns + 1, #self.columns do
         self:_discard(self.columns[i])
         self.columns[i] = nil
     end
 end
 
--- The view owning the current buffer, if any. Commands dispatch through this.
+-- the view owning the current buffer, if any. commands dispatch through this
 ---@return dipher.View|nil
 function View.current()
     return by_buf[vim.api.nvim_get_current_buf()]
 end
 
--- Whether the view's primary window is still alive (panel uses this to decide
--- between re-sourcing in place and opening fresh).
+-- whether the view's primary window is still alive (panel uses this to decide
+-- between re-sourcing in place and opening fresh)
 ---@return boolean
 function View:is_open()
     local col = self.columns[1]
     return col ~= nil and col.winid ~= nil and vim.api.nvim_win_is_valid(col.winid)
 end
 
--- Swap the diffed file in place: same windows/layout/context, new model. The
+-- swap the diffed file in place: same windows/layout/context, new model. the
 -- panel calls this when a different file is selected so the View is re-sourced,
--- not recreated (§8.6 separation of concerns). Column count is layout-determined,
--- so it never changes here — no relayout.
+-- not recreated (§8.6 separation of concerns). column count is layout-determined,
+-- so it never changes here, no relayout
 ---@param model dipher.DiffModel
 function View:set_source(model)
     self.model = model
     self:rerender({ layout = self.layout, context = self.context, deep_diff = self.deep_diff })
 end
 
--- Swap the layout for this view (a pure re-render behind the map contract, §8.3).
--- Column count changes (1 <-> 2), so re-lay the windows after.
+-- swap the layout for this view (a pure re-render behind the map contract, §8.3).
+-- column count changes (1 <-> 2), so re-lay the windows after
 ---@param layout dipher.Layout
 function View:set_layout(layout)
     if layout == self.layout then
@@ -130,19 +159,19 @@ function View:set_layout(layout)
     self:_relayout()
 end
 
--- Flip stacked <-> split.
+-- flip stacked <-> split
 function View:toggle_layout()
     self:set_layout(self.layout == "stacked" and "split" or "stacked")
 end
 
--- Set the per-view context line count (math.huge = whole file). Same column
--- count, so no relayout — content/map/gutter/highlights refresh in place.
+-- set the per-view context line count (math.huge = whole file). same column
+-- count, so no relayout, content/map/gutter/highlights refresh in place
 ---@param n integer
 function View:set_context(n)
     self:rerender({ layout = self.layout, context = n, deep_diff = self.deep_diff })
 end
 
--- Widen/narrow context by `delta`. No-op while whole-file (can't decrement ∞).
+-- widen/narrow context by `delta`. no-op while whole-file (can't decrement ∞)
 ---@param delta integer
 function View:adjust_context(delta)
     if self.context == math.huge then
@@ -151,8 +180,8 @@ function View:adjust_context(delta)
     self:set_context(math.max(0, self.context + delta))
 end
 
--- Per-window appearance + buffer-local motions. Our own dual-rail gutter replaces
--- the native gutter; ]c / [c jump between hunks via the active column's map.
+-- per-window appearance + buffer-local motions. our own dual-rail gutter replaces
+-- the native gutter; ]c / [c jump between hunks via the active column's map
 ---@param winid integer
 ---@param bufnr integer
 function View:_setup_window(winid, bufnr)
@@ -176,10 +205,45 @@ function View:_setup_window(winid, bufnr)
     vim.keymap.set("n", "d-", function()
         self:adjust_context(-1)
     end, { buffer = bufnr, desc = "dipher: less context" })
+    -- ]f / [f drive the file panel's selection in lockstep, keeping focus here in
+    -- the diff window (no-op when no panel is open)
+    vim.keymap.set("n", "]f", function()
+        self:step_file("next")
+    end, { buffer = bufnr, desc = "dipher: next file" })
+    vim.keymap.set("n", "[f", function()
+        self:step_file("prev")
+    end, { buffer = bufnr, desc = "dipher: previous file" })
+    -- f / b quarter-page scroll (opt-out: shadows native find-char / back-word)
+    if self.keymaps.quarter_scroll ~= false then
+        vim.keymap.set("n", "f", function()
+            self:quarter_scroll("down")
+        end, { buffer = bufnr, desc = "dipher: scroll down a quarter page" })
+        vim.keymap.set("n", "b", function()
+            self:quarter_scroll("up")
+        end, { buffer = bufnr, desc = "dipher: scroll up a quarter page" })
+    end
 end
 
--- Move the cursor to the next/prev hunk in the focused column. No-op (silent) at
--- the first/last hunk, matching Vim diff-mode motions.
+-- step the file panel's selection (and re-source this view) without leaving the
+-- diff window, the in-view counterpart to the panel's own ]f / [f
+---@param direction "next"|"prev"
+function View:step_file(direction)
+    local panel = require("dipher.panel").current()
+    if panel and panel:is_open() then
+        panel:goto_file(direction, true) -- keep focus in the diff window
+    end
+end
+
+-- scroll a quarter of the window height, cursor following (count-prefixed <C-d>/
+-- <C-u>, which clamp at the buffer ends)
+---@param direction "down"|"up"
+function View:quarter_scroll(direction)
+    local n = math.max(1, math.floor(vim.api.nvim_win_get_height(0) / 4))
+    vim.api.nvim_feedkeys(n .. (direction == "down" and CTRL_D or CTRL_U), "nx", false)
+end
+
+-- move the cursor to the next/prev hunk in the focused column. no-op (silent) at
+-- the first/last hunk, matching vim diff-mode motions
 ---@param direction "next"|"prev"
 function View:goto_hunk(direction)
     local win = vim.api.nvim_get_current_win()
@@ -191,8 +255,8 @@ function View:goto_hunk(direction)
         end
     end
     local lnum = vim.api.nvim_win_get_cursor(col.winid or win)[1]
-    -- Explicit branch, not `a and next() or prev()`: next_hunk returns nil at the
-    -- last hunk, which the and/or idiom would wrongly fall through to prev_hunk.
+    -- explicit branch, not `a and next() or prev()`: next_hunk returns nil at the
+    -- last hunk, which the and/or idiom would wrongly fall through to prev_hunk
     local target
     if direction == "next" then
         target = nav.next_hunk(col.map, lnum)
@@ -204,9 +268,9 @@ function View:goto_hunk(direction)
     end
 end
 
--- Lay the columns into windows. The first column anchors on its existing window
+-- lay the columns into windows. the first column anchors on its existing window
 -- (or the current one on first open); extra columns reuse their window or vsplit
--- a fresh one; >1 column scroll-binds. Single authority for open + layout toggle.
+-- a fresh one; >1 column scroll-binds. single authority for open + layout toggle
 function View:_relayout()
     local anchor = self.columns[1].winid
     if not (anchor and vim.api.nvim_win_is_valid(anchor)) then
@@ -234,14 +298,14 @@ function View:_relayout()
     end
 end
 
--- Open the view: stacked takes the current window, split adds a scroll-bound pane.
+-- open the view: stacked takes the current window, split adds a scroll-bound pane
 ---@return dipher.View
 function View:open()
     self:_relayout()
     return self
 end
 
--- Tear down a single column's window (if any) and buffer.
+-- tear down a single column's window (if any) and buffer
 ---@param col dipher.ViewColumn|nil
 function View:_discard(col)
     if not col then
@@ -257,7 +321,7 @@ function View:_discard(col)
     end
 end
 
--- Close all windows and delete all buffers owned by the view.
+-- close all windows and delete all buffers owned by the view
 function View:close()
     for _, col in ipairs(self.columns) do
         self:_discard(col)

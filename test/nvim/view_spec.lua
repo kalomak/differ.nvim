@@ -1,16 +1,16 @@
--- Runs under headless nvim: drives the View through real windows/buffers and
--- asserts content, the diff highlight extmarks, and split scroll-binding.
+-- runs under headless nvim: drives the View through real windows/buffers and
+-- asserts content, the diff highlight extmarks, and split scroll-binding
 local diff = require("dipher.model.diff")
 local View = require("dipher.view")
 
--- nvim_create_namespace is idempotent by name, so this is the same ns the View uses.
+-- nvim_create_namespace is idempotent by name, so this is the same ns the View uses
 local ns = vim.api.nvim_create_namespace("dipher")
 
 local function model(old, new)
     return diff.build({ path = "x", old_rev = "A", new_rev = "B", old_text = old, new_text = new })
 end
 
--- Collect line_hl_group per 0-based row and word hl_group spans from the namespace.
+-- collect line_hl_group per 0-based row and word hl_group spans from the namespace
 local function extmarks(bufnr)
     local line_hl, word = {}, {}
     for _, m in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })) do
@@ -134,6 +134,46 @@ describe("view hunk navigation", function()
     end)
 end)
 
+describe("view in-view keymaps", function()
+    local function maps(v)
+        local lhs = {}
+        for _, m in ipairs(vim.api.nvim_buf_get_keymap(v.columns[1].bufnr, "n")) do
+            lhs[m.lhs] = true
+        end
+        return lhs
+    end
+
+    it("binds ]f/[f and (by default) f/b in the diff window", function()
+        local v = View.new(model("a\nb\n", "a\nB\n"), {
+            layout = "stacked",
+            context = math.huge,
+            deep_diff = { enabled = true },
+        })
+        v:open()
+        local lhs = maps(v)
+        assert.is_true(lhs["]f"])
+        assert.is_true(lhs["[f"])
+        assert.is_true(lhs["f"])
+        assert.is_true(lhs["b"])
+        v:close()
+    end)
+
+    it("omits f/b when quarter_scroll is disabled, keeping ]f/[f", function()
+        local v = View.new(model("a\nb\n", "a\nB\n"), {
+            layout = "stacked",
+            context = math.huge,
+            deep_diff = { enabled = true },
+            keymaps = { quarter_scroll = false },
+        })
+        v:open()
+        local lhs = maps(v)
+        assert.is_true(lhs["]f"])
+        assert.is_nil(lhs["f"])
+        assert.is_nil(lhs["b"])
+        v:close()
+    end)
+end)
+
 describe("view layout toggle", function()
     it("drops the surplus column when going split -> stacked", function()
         local v = View.new(model("a\nM\nb\n", "a\nX\nb\n"), {
@@ -234,6 +274,32 @@ describe("view re-source", function()
         assert.are.same({ "x", "y", "Y" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
         v:close()
     end)
+
+    it("names the buffer after the file + revs and renames on re-source", function()
+        local function named(path)
+            return diff.build({
+                path = path,
+                old_rev = "HEAD",
+                new_rev = "WORKTREE",
+                old_text = "a\n",
+                new_text = "a\nb\n",
+            })
+        end
+        local v = View.new(named("lua/a.lua"), {
+            layout = "stacked",
+            context = math.huge,
+            deep_diff = { enabled = true },
+        })
+        v:open()
+        local buf = v.columns[1].bufnr
+        local name = vim.api.nvim_buf_get_name(buf)
+        assert.is_truthy(name:find("dipher://HEAD..WORKTREE/unified/lua/a.lua", 1, true))
+        assert.are.equal("a.lua", vim.fn.fnamemodify(name, ":t")) -- statusline shows the basename
+
+        v:set_source(named("lua/b.lua"))
+        assert.is_truthy(vim.api.nvim_buf_get_name(buf):find("lua/b.lua", 1, true))
+        v:close()
+    end)
 end)
 
 describe("command router", function()
@@ -261,7 +327,7 @@ describe("command router", function()
     it("completes subcommands and values", function()
         local subs = command.complete("", "Dipher ")
         table.sort(subs)
-        assert.are.same({ "context", "layout", "panel" }, subs)
+        assert.are.same({ "close", "context", "layout", "panel" }, subs)
         assert.are.same(
             { "split", "stacked" },
             (function()

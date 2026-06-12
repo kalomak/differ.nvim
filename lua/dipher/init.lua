@@ -1,4 +1,4 @@
--- Public entry point: setup() and the top-level API surface
+-- public entry point: setup() and the top-level API surface
 
 local config = require("dipher.config")
 
@@ -7,14 +7,14 @@ local M = {}
 ---@type dipher.Config|nil
 M.config = nil
 
--- Resolve options and register highlight groups; call once from user config
+-- resolve options and register highlight groups; call once from user config
 ---@param opts table|nil
 function M.setup(opts)
     M.config = config.resolve(opts)
     require("dipher.ui.highlights").setup()
 end
 
--- Return the resolved config, defaulting if setup() was never called
+-- return the resolved config, defaulting if setup() was never called
 ---@return dipher.Config
 function M.get_config()
     return M.config or config.defaults
@@ -29,8 +29,8 @@ end
 ---@field layout dipher.Layout|nil
 ---@field context integer|nil
 
--- Open a View from an already-built DiffModel. The git frontend and panel use
--- this; `opts` overrides the layout/context defaults per-view.
+-- open a View from an already-built DiffModel. the git frontend and panel use
+-- this; `opts` overrides the layout/context defaults per-view
 ---@param model dipher.DiffModel
 ---@param opts { layout?: dipher.Layout, context?: integer }|nil
 ---@return dipher.View
@@ -43,12 +43,13 @@ function M.diff_model(model, opts)
             layout = opts.layout or cfg.layout,
             context = opts.context or cfg.context,
             deep_diff = cfg.deep_diff,
+            keymaps = cfg.keymaps,
         })
         :open()
 end
 
--- Open a diff view for an old/new text pair. The frontends (local git, PR) build
--- their DiffModel from real sources; this is the shared, source-agnostic entry.
+-- open a diff view for an old/new text pair. the frontends (local git, PR) build
+-- their DiffModel from real sources; this is the shared, source-agnostic entry
 ---@param spec dipher.DiffSpec
 ---@return dipher.View
 function M.diff(spec)
@@ -62,25 +63,31 @@ function M.diff(spec)
     return M.diff_model(model, { layout = spec.layout, context = spec.context })
 end
 
--- Open a local git change set from a rev spec (§8.1), DiffviewOpen-style: the file
--- panel plus the first file's diff. The entry-point keymaps bind to this — e.g.
--- `require("dipher").open("main...")` for the branch-total diff. A string is one
--- rev token; pass a table for multi-arg forms.
+-- open a local git change set from a rev spec (§8.1), DiffviewOpen-style: the file
+-- panel plus the first file's diff. the entry-point keymaps bind to this, e.g.
+-- `require("dipher").open("main...")` for the branch-total diff. a string is one
+-- rev token; pass a table for multi-arg forms
 ---@param spec string|string[]|nil
 ---@return dipher.Panel|nil
 function M.open(spec)
     return require("dipher.git").panel({ rev = spec, open_first = true })
 end
 
--- Open (or toggle) the file panel over a local git change set (§8.6). `opts` are
+-- open (or toggle) the file panel over a local git change set (§8.6). `opts` are
 -- runtime, not setup config: `rev` (rev spec, string or args), `position`
 -- ("bottom"|"top"|"left"|"right"), `listing` ("tree"|"flat"), `height`, `width`.
--- The live panel is reachable via `require("dipher.panel").current()` for runtime
--- tweaks, e.g. `:current():set_position("left")` / `:toggle_listing()`.
+-- the live panel is reachable via `require("dipher.panel").current()` for runtime
+-- tweaks, e.g. `:current():set_position("left")` / `:toggle_listing()`
 ---@param opts table|nil
 ---@return dipher.Panel|nil
 function M.panel(opts)
     return require("dipher.git").panel(opts or {})
+end
+
+-- close the local session, the file panel and the diff view it drives (the `dc`
+-- keymap binds to this). mirrors `:DiffviewClose`
+function M.close()
+    require("dipher.git").close()
 end
 
 return M

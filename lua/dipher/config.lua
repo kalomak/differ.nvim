@@ -1,10 +1,11 @@
--- Plugin options: defaults, user merge, and shallow validation
+-- plugin options: defaults, user merge, and shallow validation
 
 ---@class dipher.Config
 ---@field layout dipher.Layout
 ---@field context integer
 ---@field deep_diff { enabled: boolean, granularity: "word"|"char", similarity_threshold: number }
 ---@field comments { inline: boolean, collapsed: boolean }
+---@field keymaps { quarter_scroll: boolean }
 ---@field sidecar_bin string|nil
 
 local M = {}
@@ -22,10 +23,16 @@ M.defaults = {
         inline = true,
         collapsed = false,
     },
+    keymaps = {
+        -- f/b quarter-page scroll in diff windows
+        -- on by default (the intended feel)
+        -- set to false to get native motions back
+        quarter_scroll = true,
+    },
     sidecar_bin = nil,
 }
 
--- Merge user opts over defaults and return the resolved config
+-- merge user opts over defaults and return the resolved config
 ---@param user table|nil
 ---@return dipher.Config
 function M.resolve(user)
