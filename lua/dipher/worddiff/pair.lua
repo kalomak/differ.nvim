@@ -1,5 +1,5 @@
--- Pure line-pairing scorer for the word-level pass, no Neovim API
--- Lines with no partner above threshold stay unpaired (whole-line highlight)
+-- pure line-pairing scorer for the word-level pass, no nvim API
+-- lines with no partner above threshold stay unpaired (whole-line highlight)
 
 local tokenize = require("dipher.worddiff.tokenize")
 
@@ -10,7 +10,7 @@ local tokenize = require("dipher.worddiff.tokenize")
 
 local M = {}
 
--- Token-set similarity (Sørensen–Dice over word tokens) in [0,1]
+-- token-set similarity (Sørensen–Dice over word tokens) in [0,1]
 ---@param a string
 ---@param b string
 ---@return number
@@ -45,7 +45,7 @@ function M.similarity(a, b)
     return (2 * inter) / total
 end
 
--- Pair old/new lines by similarity; greedy best-match above threshold
+-- pair old/new lines by similarity; greedy best-match above threshold
 ---@param old_lines string[]
 ---@param new_lines string[]
 ---@param threshold number

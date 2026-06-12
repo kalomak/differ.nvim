@@ -1,9 +1,9 @@
 local stacked = require("dipher.render.stacked")
 local nav = require("dipher.nav")
 
--- Two hunks far apart -> stacked (full context) buffer:
+-- two hunks far apart -> stacked (full context) buffer:
 --   1 ctx | 2 old"2" h1 | 3 new"X" h1 | 4-8 ctx | 9 old"8" h2 | 10 new"Y" h2 | 11 ctx
--- hunk starts at buffer lnums 2 and 9.
+-- hunk starts at buffer lnums 2 and 9
 local function two_hunk_map()
     return stacked.render({
         path = "x",

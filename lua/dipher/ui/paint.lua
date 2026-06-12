@@ -1,7 +1,7 @@
--- Diff highlight layer: line-level backgrounds and word-level spans for one
--- column's buffer, applied as extmarks from its map. Idempotent — clears the
+-- diff highlight layer: line-level backgrounds and word-level spans for one
+-- column's buffer, applied as extmarks from its map. idempotent, clears the
 -- namespace first, so it doubles as a refresh after a re-render or overlay change.
--- Buffer content and the map are never touched here (invariant 2).
+-- buffer content and the map are never touched here (invariant 2)
 
 local M = {}
 
@@ -10,7 +10,7 @@ local LINE_HL = { old = "dipherLineDelete", new = "dipherLineAdd" }
 ---@type table<dipher.RailKind, string>
 local WORD_HL = { old = "dipherWordDelete", new = "dipherWordAdd" }
 
--- Paint a column's buffer. `ns` is the caller's extmark namespace.
+-- paint a column's buffer. `ns` is the caller's extmark namespace
 ---@param bufnr integer
 ---@param ns integer
 ---@param column dipher.Column

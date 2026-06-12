@@ -1,4 +1,4 @@
--- Runs under headless nvim (vim.diff available); invoked via the nvim-test target
+-- runs under headless nvim (vim.diff available); invoked via the nvim-test target
 local diff = require("dipher.model.diff")
 
 describe("model.diff.build", function()

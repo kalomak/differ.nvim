@@ -1,10 +1,10 @@
--- Shared text helpers, pure Lua, no Neovim API
+-- shared text helpers, pure lua, no nvim API
 
 local M = {}
 
--- Split text into lines, tolerating a missing trailing newline.
--- A terminating newline does not yield a trailing empty line; an unterminated
--- final line is kept. Pure so renderers stay golden-testable without Neovim.
+-- split text into lines, tolerating a missing trailing newline.
+-- a terminating newline does not yield a trailing empty line; an unterminated
+-- final line is kept. pure, so renderers stay testable without nvim
 ---@param text string
 ---@return string[]
 function M.to_lines(text)

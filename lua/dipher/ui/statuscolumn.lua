@@ -1,15 +1,15 @@
--- Dual-rail gutter: a statuscolumn function reading the active buffer's line map
--- Map lookup is O(1); rail strings are pre-formatted at render time
+-- dual-rail gutter: a statuscolumn function reading the active buffer's line map
+-- map lookup is O(1); rail strings are pre-formatted at render time
 
 local M = {}
 
 ---@type table<integer, string[]> -- bufnr -> pre-formatted rail string per lnum
 local rails = {}
 
--- Pre-format the gutter string for every line of a column from its map. Pure, so
--- the statuscolumn callback only does an O(1) index per redraw (§11). A unified
+-- pre-format the gutter string for every line of a column from its map. pure, so
+-- the statuscolumn callback only does an O(1) index per redraw (§11). a unified
 -- column shows both rails (old left / new right); a side column shows only its
--- own number; absent sides and meta/filler rows render as blanks.
+-- own number; absent sides and meta/filler rows render as blanks
 ---@param column dipher.Column
 ---@return string[]
 function M.format(column)
@@ -43,14 +43,14 @@ function M.format(column)
     return out
 end
 
--- Store pre-formatted rail strings for a buffer after a render
+-- store pre-formatted rail strings for a buffer after a render
 ---@param bufnr integer
 ---@param strings string[]
 function M.set(bufnr, strings)
     rails[bufnr] = strings
 end
 
--- Drop a buffer's cached rail strings
+-- drop a buffer's cached rail strings
 ---@param bufnr integer
 function M.clear(bufnr)
     rails[bufnr] = nil

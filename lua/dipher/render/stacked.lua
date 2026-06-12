@@ -1,7 +1,7 @@
--- Stacked dual-rail renderer: old/new interleaved per hunk on one scroll surface.
--- Pure function over the hunk model (no Neovim API) so it stays golden-testable.
--- Buffer lines are raw code (search/yank/motions work); +/- styling and line
--- numbers are painted later from the map, never baked into the text.
+-- stacked dual-rail renderer: old/new interleaved per hunk on one scroll surface.
+-- pure function over the hunk model (no nvim API) so it stays testable without nvim.
+-- buffer lines are raw code (search/yank/motions work); +/- styling and line
+-- numbers are painted later from the map, never baked into the text
 
 local LineMap = require("dipher.render.linemap")
 local text_util = require("dipher.util.text")
@@ -10,15 +10,15 @@ local walk = require("dipher.render.walk")
 
 local M = {}
 
--- Buffer text for a collapsed-context separator. No line numbers (kind=="meta").
+-- buffer text for a collapsed-context separator. no line numbers (kind=="meta")
 ---@param hidden integer
 ---@return string
 local function meta_text(hidden)
     return ("\u{22ef} %d unchanged line%s"):format(hidden, hidden == 1 and "" or "s")
 end
 
--- Render a model into a single "unified" column: interleaved buffer lines plus
--- a populated line map.
+-- render a model into a single "unified" column: interleaved buffer lines plus
+-- a populated line map
 ---@param model dipher.DiffModel
 ---@param opts { context: integer, deep_diff?: table }
 ---@return dipher.RenderResult
@@ -26,7 +26,7 @@ function M.render(model, opts)
     local map = LineMap.new()
     local lines = {}
 
-    -- Identical content produces no hunks; nothing to show.
+    -- identical content produces no hunks; nothing to show
     if #model.hunks == 0 then
         return { columns = { { lines = lines, map = map, side = "unified" } }, rows = 0 }
     end
@@ -37,7 +37,7 @@ function M.render(model, opts)
     local threshold = deep.similarity_threshold or 0.5
     local mode = deep.granularity or "word"
 
-    -- Context lines are identical on both sides, so old_all supplies their text.
+    -- context lines are identical on both sides, so old_all supplies their text
     local old_all = text_util.to_lines(model.old_text)
 
     walk.walk(model, context, #old_all, {
@@ -49,7 +49,7 @@ function M.render(model, opts)
             lines[#lines + 1] = meta_text(hidden)
             map:push({ kind = "meta" })
         end,
-        -- A hunk shows its old (deleted) lines as a block, then its new (added) lines.
+        -- a hunk shows its old (deleted) lines as a block, then its new (added) lines
         hunk = function(h, hi)
             local old_spans, new_spans = {}, {}
             if deep_on then

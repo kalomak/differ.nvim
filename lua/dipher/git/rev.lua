@@ -1,7 +1,7 @@
--- Git source resolution: pure mapping from :Dipher args to a (old, new) pair of
+-- git source resolution: pure mapping from :Dipher args to a (old, new) pair of
 -- side refs, the `git diff` args that list that pairing's changed files, and a
--- parser for `--name-status -z` output. No Neovim or subprocess here — exec lives
--- in git/init.lua — so this stays unit-testable under plain busted.
+-- parser for `--name-status -z` output. no nvim or subprocess here (exec lives
+-- in git/init.lua) so this stays unit-testable under plain busted
 
 local M = {}
 
@@ -24,7 +24,7 @@ local function rev_ref(rev)
     return { kind = "rev", rev = rev, label = rev }
 end
 
--- An unresolved merge-base ref; git/init.lua resolves it to a concrete rev.
+-- an unresolved merge-base ref; git/init.lua resolves it to a concrete rev
 ---@param base string
 ---@param head string
 ---@param label string
@@ -33,10 +33,10 @@ local function merge_base_ref(base, head, label)
     return { kind = "merge_base", base = base, head = head, label = label }
 end
 
--- Resolve :Dipher args into a source pairing (§8.1). Mirrors git/diffview rev
--- syntax so existing muscle memory carries over. These forms cover the whole
+-- resolve :Dipher args into a source pairing (§8.1). mirrors git/diffview rev
+-- syntax so existing muscle memory carries over. these forms cover the whole
 -- daily loop (uncommitted / branch-total / range / since-rev); staged-only has no
--- entry — staged/unstaged is a file-panel concern (§8.6), not a diff-open flag:
+-- entry (staged/unstaged is a file-panel concern (§8.6), not a diff-open flag):
 --   (none)              -> HEAD vs worktree              (all uncommitted changes)
 --   <a>..<b>            -> <a> vs <b>                     (plain two-dot range)
 --   <a>...<b>           -> merge-base(a,b) vs <b>         (three-dot; since they diverged)
@@ -51,8 +51,8 @@ function M.source(args)
     if first == nil or first == "" then
         return { old = rev_ref("HEAD"), new = WORKTREE }
     end
-    -- Three-dot before two-dot (it's a superset). Empty RHS is the branch-total
-    -- convenience: merge-base vs the working tree, so uncommitted work is included.
+    -- three-dot before two-dot (it's a superset). empty RHS is the branch-total
+    -- convenience: merge-base vs the working tree, so uncommitted work is included
     local ta, tb = first:match("^(.-)%.%.%.(.*)$")
     if ta and ta ~= "" then
         if tb == "" then
@@ -70,8 +70,8 @@ function M.source(args)
     return { old = rev_ref(first), new = WORKTREE }
 end
 
--- The arguments to append after `git diff --name-status -z` to list this source's
--- changed files. Expects a *resolved* source (merge_base already turned into a
+-- the arguments to append after `git diff --name-status -z` to list this source's
+-- changed files. expects a *resolved* source (merge_base already turned into a
 -- rev by git/init.lua), so old is always a rev:
 --   rev vs worktree -> `git diff <rev>`   (uncommitted diff against rev)
 --   rev vs rev      -> `git diff <a> <b>`
@@ -85,8 +85,8 @@ function M.diff_args(source)
     return { o.rev, n.rev }
 end
 
--- Split a NUL-delimited byte string into fields. Pure (avoids vim.split's vim dep)
--- and trailing-NUL tolerant, matching git's `-z` framing.
+-- split a NUL-delimited byte string into fields. pure (avoids vim.split's vim dep)
+-- and trailing-NUL tolerant, matching git's `-z` framing
 ---@param s string
 ---@return string[]
 local function nul_split(s)
@@ -108,8 +108,8 @@ end
 ---@field path string
 ---@field previous_path string|nil     -- source path on rename/copy
 
--- Parse `git diff --name-status -z [...]` output. Rename/copy records carry the
--- similarity-suffixed status (e.g. "R100") followed by old then new path.
+-- parse `git diff --name-status -z [...]` output. rename/copy records carry the
+-- similarity-suffixed status (e.g. "R100") followed by old then new path
 ---@param out string
 ---@return dipher.git.ChangedFile[]
 function M.parse_name_status(out)
@@ -140,10 +140,10 @@ end
 ---@field path string
 ---@field previous_path string|nil  -- source path on rename/copy
 
--- Parse `git status --porcelain=v1 -z -uall` (§8.6 slice B). Each record is
+-- parse `git status --porcelain=v1 -z -uall` (§8.6 slice B). each record is
 -- `XY<sp><path>`; X is the staged (HEAD↔index) state, Y the unstaged
--- (index↔worktree) state. Rename/copy records (X or Y = R/C) carry the original
--- path in the *next* NUL field, which we attach as previous_path.
+-- (index↔worktree) state. rename/copy records (X or Y = R/C) carry the original
+-- path in the *next* NUL field, which we attach as previous_path
 ---@param out string
 ---@return dipher.git.StatusEntry[]
 function M.parse_status(out)
@@ -166,10 +166,10 @@ function M.parse_status(out)
     return entries
 end
 
--- Parse `git diff --numstat -z` into a path -> {additions, deletions} map (§8.6
--- slice B). A normal record is `<add>\t<del>\t<path>`; a rename leaves the path
+-- parse `git diff --numstat -z` into a path -> {additions, deletions} map (§8.6
+-- slice B). a normal record is `<add>\t<del>\t<path>`; a rename leaves the path
 -- field empty and emits the old then new path as the next two NUL fields (we key
--- on the new path). Binary files report `-` counts, which become 0.
+-- on the new path). binary files report `-` counts, which become 0
 ---@param out string
 ---@return table<string, { additions: integer, deletions: integer }>
 function M.parse_numstat(out)

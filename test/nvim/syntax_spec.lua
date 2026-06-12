@@ -1,6 +1,6 @@
--- Runs under headless nvim: drives the View over real Lua source and asserts the
+-- runs under headless nvim: drives the View over real lua source and asserts the
 -- treesitter syntax pass (§6.5) projects captures onto the derived buffer through
--- the line map — in its own namespace, layered under the diff highlights.
+-- the line map, in its own namespace, layered under the diff highlights
 local diff = require("dipher.model.diff")
 local View = require("dipher.view")
 
@@ -16,7 +16,7 @@ local function model(old, new, path)
     })
 end
 
--- Syntax extmarks for a buffer: { {row, col, end_col, hl}, ... }.
+-- syntax extmarks for a buffer: { {row, col, end_col, hl}, ... }
 local function syntax_marks(bufnr)
     local out = {}
     for _, m in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })) do
@@ -25,7 +25,7 @@ local function syntax_marks(bufnr)
     return out
 end
 
--- Is there a mark with `hl` on `row` (optionally starting at `col`)?
+-- is there a mark with `hl` on `row` (optionally starting at `col`)?
 local function has(marks, row, hl, col)
     for _, m in ipairs(marks) do
         if m.row == row and m.hl == hl and (col == nil or m.col == col) then

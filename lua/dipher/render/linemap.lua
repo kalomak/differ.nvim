@@ -1,5 +1,5 @@
--- Line map: the frozen contract everything reads
--- Pure Lua, no Neovim API, so renderers that produce maps stay golden-testable
+-- line map: the frozen contract everything reads
+-- pure lua, no nvim API, so renderers that produce maps are testable without nvim
 
 ---@class dipher.SubSpan
 ---@field col_start integer  -- byte col, 0-based inclusive
@@ -21,13 +21,13 @@
 local LineMap = {}
 LineMap.__index = LineMap
 
--- Create an empty map for a renderer to populate
+-- create an empty map for a renderer to populate
 ---@return dipher.LineMap
 function LineMap.new()
     return setmetatable({ lines = {}, from_old = {}, from_new = {} }, LineMap)
 end
 
--- Append a rail line and keep the reverse indices in sync
+-- append a rail line and keep the reverse indices in sync
 ---@param line dipher.RailLine
 ---@return integer buf_lnum
 function LineMap:push(line)
@@ -42,7 +42,7 @@ function LineMap:push(line)
     return lnum
 end
 
--- Number of derived-buffer lines
+-- number of derived-buffer lines
 ---@return integer
 function LineMap:len()
     return #self.lines

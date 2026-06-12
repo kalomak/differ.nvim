@@ -17,7 +17,7 @@ describe("syntax.project", function()
 
     it("drops captures whose source line is absent from the column", function()
         -- only old line 2 is present in this column (e.g. lines 1/3 have no partner
-        -- or are meta/filler), so captures on rows 0 and 2 fall away.
+        -- or are meta/filler), so captures on rows 0 and 2 fall away
         local from = { [2] = 3 }
         local caps = {
             { row = 0, col_start = 0, col_end = 1, hl = "@a.x" },

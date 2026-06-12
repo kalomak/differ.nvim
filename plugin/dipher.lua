@@ -1,4 +1,4 @@
--- Command registration; loaded once on startup
+-- command registration; loaded once on startup
 
 if vim.g.loaded_dipher then
     return

@@ -1,5 +1,5 @@
--- Pure tokenizer for the word-level pass, no Neovim API
--- Word mode keeps [%w_]+ runs whole, so foo_bar and fooBar are single tokens
+-- pure tokenizer for the word-level pass, no nvim API
+-- word mode keeps [%w_]+ runs whole, so foo_bar and fooBar are single tokens
 
 ---@class dipher.Token
 ---@field text string
@@ -8,7 +8,7 @@
 
 local M = {}
 
--- Tokenize into identifier runs, whitespace runs, and single punctuation chars
+-- tokenize into identifier runs, whitespace runs, and single punctuation chars
 ---@param line string
 ---@return dipher.Token[]
 function M.word(line)
@@ -35,7 +35,7 @@ function M.word(line)
     return tokens
 end
 
--- Tokenize into one token per byte
+-- tokenize into one token per byte
 ---@param line string
 ---@return dipher.Token[]
 function M.char(line)
@@ -46,7 +46,7 @@ function M.char(line)
     return tokens
 end
 
--- Dispatch to the word or char tokenizer
+-- dispatch to the word or char tokenizer
 ---@param line string
 ---@param mode "word"|"char"
 ---@return dipher.Token[]

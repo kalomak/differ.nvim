@@ -1,6 +1,6 @@
--- Runs under headless nvim: drives the Panel component through a real window —
--- rendering, selection callback, fold, and the runtime listing/position API.
--- Fed plain FileEntry lists (no git), since the panel is source-agnostic.
+-- runs under headless nvim: drives the Panel component through a real window
+-- (rendering, selection callback, fold, and the runtime listing/position API).
+-- fed plain FileEntry lists (no git), since the panel is source-agnostic
 local Panel = require("dipher.panel")
 
 local function fe(path, status)

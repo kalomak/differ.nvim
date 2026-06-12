@@ -2,8 +2,8 @@ local split = require("dipher.render.split")
 
 local FULL = math.huge
 
--- Split renders two columns ("old" left, "new" right); expose them under the
--- old_*/new_* names the assertions read.
+-- split renders two columns ("old" left, "new" right); expose them under the
+-- old_*/new_* names the assertions read
 local function render(model, opts)
     local r = split.render(model, opts)
     return {

@@ -1,9 +1,9 @@
--- Syntax projection: map source-coordinate treesitter captures onto derived-buffer
--- rows through a line map's from-index. Pure Lua, no Neovim API — this is the
+-- syntax projection: map source-coordinate treesitter captures onto derived-buffer
+-- rows through a line map's from-index. pure lua, no nvim API; this is the
 -- §6.5 "captures + map -> extmark list" step, the unit-testable core of the pass.
--- Columns are byte-identical to the source line, so byte cols pass through
--- unchanged; only the row is remapped. Captures on a source line not present in
--- this column (meta/filler/no-partner) have no buffer row and are dropped.
+-- columns are byte-identical to the source line, so byte cols pass through
+-- unchanged; only the row is remapped. captures on a source line not present in
+-- this column (meta/filler/no-partner) have no buffer row and are dropped
 
 local M = {}
 
@@ -19,8 +19,8 @@ local M = {}
 ---@field col_end integer
 ---@field hl string
 
--- Project source captures onto buffer rows via `from_map` (source lnum 1-based ->
--- buffer lnum 1-based). Returns extmark specs in buffer coordinates.
+-- project source captures onto buffer rows via `from_map` (source lnum 1-based ->
+-- buffer lnum 1-based). returns extmark specs in buffer coordinates
 ---@param captures dipher.SyntaxCapture[]
 ---@param from_map table<integer, integer>
 ---@return dipher.SyntaxMark[]

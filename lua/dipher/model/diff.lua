@@ -1,4 +1,4 @@
--- Canonical hunk model built from vim.diff(); buffers are projections of this
+-- canonical hunk model built from vim.diff(); buffers are projections of this
 
 ---@class dipher.Hunk
 ---@field old_start integer
@@ -23,7 +23,7 @@ local ensure_trailing_nl = text_util.ensure_trailing_nl
 
 local M = {}
 
--- Slice a 1-based inclusive range out of a line array
+-- slice a 1-based inclusive range out of a line array
 ---@param lines string[]
 ---@param start integer
 ---@param count integer
@@ -36,7 +36,7 @@ local function slice(lines, start, count)
     return out
 end
 
--- Build a DiffModel from old/new file contents
+-- build a DiffModel from old/new file contents
 ---@param opts { path: string, old_rev: string, new_rev: string, old_text: string, new_text: string }
 ---@return dipher.DiffModel
 function M.build(opts)

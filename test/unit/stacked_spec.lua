@@ -1,12 +1,12 @@
 local stacked = require("dipher.render.stacked")
 
--- Hand-built models use the vim.text.diff index convention (verified against the
+-- hand-built models use the vim.text.diff index convention (verified against the
 -- engine): pure insertions report old_count==0 with old_start at the preceding
--- old line; pure deletions mirror it on the new side.
+-- old line; pure deletions mirror it on the new side
 
 local FULL = math.huge
 
--- Stacked renders a single "unified" column; unwrap it for the assertions.
+-- stacked renders a single "unified" column; unwrap it for the assertions
 local function render(model, opts)
     return stacked.render(model, opts).columns[1]
 end

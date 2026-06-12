@@ -1,7 +1,7 @@
--- File-tree model for the panel (§8.6): turn a flat FileEntry list into a folded
--- directory tree, and flatten it to display rows (tree or flat). Pure Lua, no
--- Neovim API — the structural logic is unit-testable; rendering/highlighting and
--- the window live in panel/init.lua.
+-- file-tree model for the panel (§8.6): turn a flat FileEntry list into a folded
+-- directory tree, and flatten it to display rows (tree or flat). pure lua, no
+-- nvim API; the structural logic is unit-testable; rendering/highlighting and
+-- the window live in panel/init.lua
 
 local M = {}
 
@@ -12,7 +12,7 @@ local M = {}
 ---@field deletions integer
 ---@field staged boolean|nil       -- which local section it belongs to
 ---@field previous_path string|nil -- renames/copies
----@field viewed boolean|nil       -- PR only (§8.2)
+---@Field viewed boolean|nil       -- PR only (§8.2)
 
 ---@class dipher.panel.Node
 ---@field kind "dir"|"file"
@@ -45,7 +45,7 @@ local function split_path(p)
     return parts
 end
 
--- Sort each dir's children: directories first, then files, alphabetical within.
+-- sort each dir's children: directories first, then files, alphabetical within
 ---@param node dipher.panel.Node
 local function sort_tree(node)
     if node.kind ~= "dir" then
@@ -62,9 +62,9 @@ local function sort_tree(node)
     end
 end
 
--- Collapse single-child directory chains into one node (common-prefix folding,
--- GitHub/diffview-style): a dir whose only child is a dir becomes "parent/child".
--- Recurses children first so chains fold maximally. The root is never folded.
+-- collapse single-child directory chains into one node (common-prefix folding,
+-- gitHub/diffview-style): a dir whose only child is a dir becomes "parent/child".
+-- recurses children first so chains fold maximally. the root is never folded
 ---@param node dipher.panel.Node
 ---@return dipher.panel.Node
 local function fold(node)
@@ -83,7 +83,7 @@ local function fold(node)
     return node
 end
 
--- Build a folded directory tree from a flat entry list.
+-- build a folded directory tree from a flat entry list
 ---@param entries dipher.FileEntry[]
 ---@return dipher.panel.Node root
 function M.build(entries)
@@ -112,8 +112,8 @@ function M.build(entries)
     return root
 end
 
--- Flatten the tree to display rows. `listing` is "tree" (nested, honouring the
--- `collapsed` set of dir paths) or "flat" (leaves only, full paths).
+-- flatten the tree to display rows. `listing` is "tree" (nested, honouring the
+-- `collapsed` set of dir paths) or "flat" (leaves only, full paths)
 ---@param root dipher.panel.Node
 ---@param listing "tree"|"flat"
 ---@param collapsed table<string, boolean>|nil

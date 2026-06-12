@@ -1,11 +1,11 @@
--- Hunk navigation: pure scans over a LineMap for the next/prev hunk boundary.
--- No Neovim API, so the motion logic is unit-testable; the View binds these to
--- ]c / [c and moves the cursor.
+-- hunk navigation: pure scans over a LineMap for the next/prev hunk boundary.
+-- no nvim API, so the motion logic is unit-testable; the View binds these to
+-- ]c / [c and moves the cursor
 
 local M = {}
 
--- Buffer lnums (1-based) that begin a hunk block — the first line whose `hunk`
--- index differs from the line above it. Ascending.
+-- buffer lnums (1-based) that begin a hunk block, the first line whose `hunk`
+-- index differs from the line above it. ascending
 ---@param map dipher.LineMap
 ---@return integer[]
 local function hunk_starts(map)
@@ -20,8 +20,8 @@ local function hunk_starts(map)
     return starts
 end
 
--- First hunk start strictly after `lnum`, or nil if cursor is in/after the last
--- hunk. Does not wrap (matches Vim diff-mode ]c).
+-- first hunk start strictly after `lnum`, or nil if cursor is in/after the last
+-- hunk. does not wrap (matches vim diff-mode ]c)
 ---@param map dipher.LineMap
 ---@param lnum integer
 ---@return integer|nil
@@ -34,8 +34,8 @@ function M.next_hunk(map, lnum)
     return nil
 end
 
--- Last hunk start strictly before `lnum`, or nil if cursor is in/before the
--- first hunk. Does not wrap.
+-- last hunk start strictly before `lnum`, or nil if cursor is in/before the
+-- first hunk. does not wrap
 ---@param map dipher.LineMap
 ---@param lnum integer
 ---@return integer|nil

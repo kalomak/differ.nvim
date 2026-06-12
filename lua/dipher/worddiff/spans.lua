@@ -1,6 +1,6 @@
--- Fragment diff: paired lines -> changed byte-col spans, pure Lua, no Neovim API.
--- A pure LCS over token streams (not vim.diff) so spans stay golden-testable
--- under plain busted. Lines are short, so O(n*m) is fine.
+-- fragment diff: paired lines -> changed byte-col spans, pure lua, no nvim API.
+-- a pure LCS over token streams (not vim.diff) so spans stay testable
+-- under plain busted. lines are short, so O(n*m) is fine
 
 local tokenize = require("dipher.worddiff.tokenize")
 local pair = require("dipher.worddiff.pair")
@@ -11,7 +11,7 @@ local M = {}
 ---@field old dipher.SubSpan[]
 ---@field new dipher.SubSpan[]
 
--- Mark which tokens are common to both streams via LCS backtrack.
+-- mark which tokens are common to both streams via LCS backtrack
 ---@param a dipher.Token[]
 ---@param b dipher.Token[]
 ---@return boolean[] keep_a, boolean[] keep_b
@@ -52,7 +52,7 @@ local function common_tokens(a, b)
     return keep_a, keep_b
 end
 
--- Merge runs of non-common tokens into byte-col spans.
+-- merge runs of non-common tokens into byte-col spans
 ---@param tokens dipher.Token[]
 ---@param keep boolean[]
 ---@return dipher.SubSpan[]
@@ -78,7 +78,7 @@ local function spans_from(tokens, keep)
     return out
 end
 
--- Emit word-level spans for a single old/new line pair.
+-- emit word-level spans for a single old/new line pair
 ---@param old_line string
 ---@param new_line string
 ---@param mode "word"|"char"
@@ -96,9 +96,9 @@ function M.emit(old_line, new_line, mode)
     }
 end
 
--- Pair a hunk's lines and emit per-line spans for the matched pairs.
--- Returns sparse arrays keyed by intra-hunk line index (1-based); unpaired
--- lines have no entry and degrade to whole-line highlighting.
+-- pair a hunk's lines and emit per-line spans for the matched pairs.
+-- returns sparse arrays keyed by intra-hunk line index (1-based); unpaired
+-- lines have no entry and degrade to whole-line highlighting
 ---@param hunk dipher.Hunk
 ---@param threshold number
 ---@param mode "word"|"char"

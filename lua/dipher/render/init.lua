@@ -1,10 +1,10 @@
--- Render dispatch: the frozen signature is render(model, opts) -> RenderResult.
--- Renderers are pure functions over the hunk model; a layout toggle is a re-render.
+-- render dispatch: the frozen signature is render(model, opts) -> RenderResult.
+-- renderers are pure functions over the hunk model; a layout toggle is a re-render.
 --
--- A render is N index-aligned columns, each its own buffer content + LineMap:
+-- a render is N index-aligned columns, each its own buffer content + LineMap:
 -- stacked is one "unified" column (old/new interleaved, dual-rail gutter), split
--- is two columns ("old" left, "new" right) with filler keeping rows aligned. The
--- view layer creates one buffer per column and scroll-binds when N > 1.
+-- is two columns ("old" left, "new" right) with filler keeping rows aligned. the
+-- view layer creates one buffer per column and scroll-binds when N > 1
 
 ---@alias dipher.ColumnSide "old"|"new"|"unified"
 
@@ -29,7 +29,7 @@ local RENDERERS = {
     split = "dipher.render.split",
 }
 
--- Render a model under the given layout
+-- render a model under the given layout
 ---@param model dipher.DiffModel
 ---@param opts { layout: dipher.Layout, context: integer, deep_diff: table }
 ---@return dipher.RenderResult

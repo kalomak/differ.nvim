@@ -81,7 +81,7 @@ end)
 
 describe("git.rev.parse_status", function()
     it("splits XY into staged (x) and unstaged (y) state", function()
-        -- MM = staged + unstaged edit; ?? = untracked; " M" = unstaged-only
+        -- mM = staged + unstaged edit; ?? = untracked; " M" = unstaged-only
         local out = "MM src/keep.txt\0?? src/new.txt\0 M src/edit.txt\0"
         assert.are.same({
             { x = "M", y = "M", path = "src/keep.txt" },

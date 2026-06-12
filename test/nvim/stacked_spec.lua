@@ -1,6 +1,6 @@
--- Runs under headless nvim: feeds real vim.text.diff output through the renderer
+-- runs under headless nvim: feeds real vim.text.diff output through the renderer
 -- and asserts the map round-trips, guarding the hand-built unit fixtures against
--- any drift in the engine's hunk-index convention.
+-- any drift in the engine's hunk-index convention
 local diff = require("dipher.model.diff")
 local stacked = require("dipher.render.stacked")
 local text_util = require("dipher.util.text")
@@ -15,13 +15,13 @@ local function build(old_text, new_text)
     })
 end
 
--- Stacked renders a single "unified" column; unwrap it for the assertions.
+-- stacked renders a single "unified" column; unwrap it for the assertions
 local function render(model, opts)
     return stacked.render(model, opts).columns[1]
 end
 
--- Under full context every line is rendered, so from_old/from_new must point at a
--- buffer line whose content matches the source line. This is the core map contract.
+-- under full context every line is rendered, so from_old/from_new must point at a
+-- buffer line whose content matches the source line. this is the core map contract
 local function assert_roundtrip(old_text, new_text)
     local model = build(old_text, new_text)
     local r = render(model, { context = math.huge })

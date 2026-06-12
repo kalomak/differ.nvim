@@ -1,11 +1,11 @@
--- Side-by-side renderer from the same hunk model and map contract as stacked.
--- Pure function over the hunk model (no Neovim API).
+-- side-by-side renderer from the same hunk model and map contract as stacked.
+-- pure function over the hunk model (no nvim API).
 --
--- Real code lines must stay yankable/searchable, so side-by-side is two columns
--- (two buffers), not one buffer of "old | new" cells. This renderer emits two
+-- real code lines must stay yankable/searchable, so side-by-side is two columns
+-- (two buffers), not one buffer of "old | new" cells. this renderer emits two
 -- index-aligned line sequences plus a LineMap per side (each conforming to the
--- frozen contract verbatim). Filler cells and collapsed-context separators are
--- kind=="meta" rows with empty/marker text so both columns stay row-aligned.
+-- frozen contract verbatim). filler cells and collapsed-context separators are
+-- kind=="meta" rows with empty/marker text so both columns stay row-aligned
 
 local LineMap = require("dipher.render.linemap")
 local text_util = require("dipher.util.text")
@@ -20,7 +20,7 @@ local function meta_text(hidden)
     return ("\u{22ef} %d unchanged line%s"):format(hidden, hidden == 1 and "" or "s")
 end
 
--- Render a model into two index-aligned columns ("old" left, "new" right).
+-- render a model into two index-aligned columns ("old" left, "new" right)
 ---@param model dipher.DiffModel
 ---@param opts { context: integer, deep_diff?: table }
 ---@return dipher.RenderResult
@@ -28,7 +28,7 @@ function M.render(model, opts)
     local old_map, new_map = LineMap.new(), LineMap.new()
     local old_lines, new_lines = {}, {}
 
-    -- Push one aligned row, keeping both columns the same length.
+    -- push one aligned row, keeping both columns the same length
     ---@param ltext string|nil
     ---@param lrail dipher.RailLine
     ---@param rtext string|nil
@@ -59,7 +59,7 @@ function M.render(model, opts)
     local deep_on = deep.enabled ~= false
     local mode = deep.granularity or "word"
 
-    -- Context lines are identical on both sides, so old_all supplies their text.
+    -- context lines are identical on both sides, so old_all supplies their text
     local old_all = text_util.to_lines(model.old_text)
 
     walk.walk(model, context, #old_all, {
@@ -71,9 +71,9 @@ function M.render(model, opts)
             local t = meta_text(hidden)
             push_row(t, { kind = "meta" }, t, { kind = "meta" })
         end,
-        -- Side-by-side aligns old[i] with new[i] positionally and pads the shorter
-        -- side with filler. Word spans are computed per positionally-paired row;
-        -- similarity-based pairing is a deferred refinement (spec §6.3 / §11).
+        -- side-by-side aligns old[i] with new[i] positionally and pads the shorter
+        -- side with filler. word spans are computed per positionally-paired row;
+        -- similarity-based pairing is a deferred refinement (spec §6.3 / §11)
         hunk = function(h, hi)
             local rows = math.max(h.old_count, h.new_count)
             for i = 1, rows do
