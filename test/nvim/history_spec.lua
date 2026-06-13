@@ -58,7 +58,13 @@ describe("git.log_commits", function()
         assert.are.equal("v2: bump to 2", commits[2].subject)
         assert.are.equal("v1: seed", commits[3].subject)
         assert.are.equal(40, #commits[1].sha)
-        assert.is_truthy(commits[1].date:match("^%d%d%d%d%-%d%d%-%d%d$"))
+        assert.is_number(commits[1].epoch)
+        assert.is_true(commits[1].epoch > 0)
+        assert.are.equal("t", commits[1].author) -- the test git identity
+        assert.are.equal(1, commits[1].additions) -- v3 changes one line
+        assert.are.equal(1, commits[1].deletions)
+        assert.are.equal(2, commits[3].additions) -- the root commit adds the whole file
+        assert.are.equal(0, commits[3].deletions)
     end)
 
     it("returns an empty list for a path with no history", function()
@@ -84,6 +90,35 @@ describe(":Dipher log (single-file history)", function()
         assert.are.equal(V2, v.model.old_text)
         assert.are.equal(V3, v.model.new_text)
         h:close()
+    end)
+
+    it("renders each row with sha, date, diffstat, author and subject", function()
+        local root = repo_with_history()
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.history({})
+        local h = History.current()
+        local row = h.lines[3] -- first commit row (after the 2-line header)
+        assert.is_truthy(row:find(h.commits[1].short, 1, true)) -- short sha
+        assert.is_truthy(row:find("%d%d%d%d%-%d%d%-%d%d")) -- absolute date by default
+        assert.is_truthy(row:find("+1 -1", 1, true)) -- this commit's diffstat
+        assert.is_truthy(row:find("t", 1, true)) -- author
+        assert.is_truthy(row:find("v3: bump to 3", 1, true)) -- subject
+        h:close()
+    end)
+
+    it("renders relative dates when configured, and toggles live", function()
+        local root = repo_with_history()
+        vim.cmd.edit(root .. "/a.lua")
+        require("dipher").setup({ relative_dates = true })
+        git_src.history({})
+        local h = History.current()
+        assert.is_truthy(h.lines[3]:find("ago", 1, true)) -- relative by config
+        assert.is_falsy(h.lines[3]:find("%d%d%d%d%-%d%d%-%d%d")) -- not absolute
+
+        h:toggle_relative_dates()
+        assert.is_truthy(h.lines[3]:find("%d%d%d%d%-%d%d%-%d%d")) -- back to absolute
+        h:close()
+        require("dipher").setup({}) -- restore defaults for the rest of the suite
     end)
 
     it("steps to an older commit and re-sources the same view in place", function()

@@ -6,6 +6,7 @@
 ---@field deep_diff { enabled: boolean, granularity: "word"|"char", similarity_threshold: number }
 ---@field comments { inline: boolean, collapsed: boolean }
 ---@field keymaps { quarter_scroll: boolean }
+---@field relative_dates boolean
 ---@field sidecar_bin string|nil
 
 local M = {}
@@ -29,6 +30,9 @@ M.defaults = {
         -- set to false to get native motions back
         quarter_scroll = true,
     },
+    -- show dates as relative ("3 days ago") instead of YYYY-MM-DD wherever the
+    -- plugin renders one (the history panel today, more surfaces later)
+    relative_dates = false,
     sidecar_bin = nil,
 }
 

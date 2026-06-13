@@ -6,6 +6,7 @@
 -- commit-shaped, so it doesn't reuse panel/tree.lua (no dirs, sections, staging)
 
 local set_wo = require("dipher.util.win").set_local
+local date_util = require("dipher.util.date")
 
 local ns = vim.api.nvim_create_namespace("dipher.history")
 local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
@@ -26,6 +27,7 @@ local current = nil
 ---@field on_close fun()|nil
 ---@field path string              -- the file, for the header (display form)
 ---@field quarter_scroll boolean
+---@field relative_dates boolean
 ---@field position string
 ---@field lines string[]
 local History = {}
@@ -37,6 +39,7 @@ History.__index = History
 ---@field on_close? fun()
 ---@field path string
 ---@field quarter_scroll? boolean
+---@field relative_dates? boolean
 ---@field position? "bottom"|"top"|"left"|"right"
 
 -- build a history panel (buffer only; the window is created on :open, so it's
@@ -61,6 +64,7 @@ function History.new(opts)
         on_close = opts.on_close,
         path = opts.path,
         quarter_scroll = opts.quarter_scroll ~= false,
+        relative_dates = opts.relative_dates or false,
         position = opts.position or "bottom",
         lines = {},
     }, History)
@@ -81,26 +85,88 @@ function History:_index_at(lnum)
     return (i >= 1 and i <= #self.commits) and i or nil
 end
 
--- a commit row: short sha, date, subject in fixed columns. returns the line plus
--- the byte offsets to highlight (sha + date; subject stays default)
----@param c dipher.git.Commit
----@return string line, integer date_col, integer date_end
-local function commit_row(c)
-    local sha = c.short
-    local prefix = sha .. "  " -- two spaces between sha and date
-    local date_col = #prefix
-    local line = prefix .. c.date .. "  " .. c.subject
-    return line, date_col, date_col + #c.date
+local AUTHOR_MAX = 18 -- cap the author column so a long name can't shove subjects off-screen
+
+-- truncate to `w` bytes, marking the cut with an ellipsis
+---@param s string
+---@param w integer
+---@return string
+local function truncate(s, w)
+    if #s <= w then
+        return s
+    end
+    return s:sub(1, w - 1) .. "…"
 end
 
--- repaint the buffer: a two-line header (file + help hint) then one row per commit
+-- assemble one commit row from its precomputed cells, left-aligned and padded to
+-- the shared column widths. returns the line plus highlight spans
+-- ({ col, end_col, hl }); the count cell colours its +N and -M parts separately
+---@param cells { sha: string, date: string, author: string, add: integer, del: integer, subject: string }
+---@param w { sha: integer, date: integer, count: integer, author: integer }
+---@return string line, { [1]: integer, [2]: integer, [3]: string }[] spans
+local function build_row(cells, w)
+    local parts, spans, col = {}, {}, 0
+    local function emit(text)
+        parts[#parts + 1] = text
+        col = col + #text
+    end
+    -- a padded cell with a single highlight, plus the two-space column gap
+    local function cell(text, width, hl)
+        local start = col
+        emit(text)
+        spans[#spans + 1] = { start, col, hl }
+        if #text < width then
+            emit(string.rep(" ", width - #text))
+        end
+        emit("  ")
+    end
+    cell(cells.sha, w.sha, "dipherPanelDir")
+    cell(cells.date, w.date, "dipherPanelHelp")
+    -- count cell: "+N -M", the two halves coloured like the file panel's counts
+    local add, del = "+" .. cells.add, "-" .. cells.del
+    local cs = col
+    local astart = col
+    emit(add)
+    spans[#spans + 1] = { astart, col, "dipherPanelCountAdd" }
+    emit(" ")
+    local dstart = col
+    emit(del)
+    spans[#spans + 1] = { dstart, col, "dipherPanelCountDelete" }
+    if col - cs < w.count then
+        emit(string.rep(" ", w.count - (col - cs)))
+    end
+    emit("  ")
+    cell(cells.author, w.author, "dipherHistoryAuthor")
+    emit(cells.subject) -- subject takes the rest, default colour
+    return table.concat(parts), spans
+end
+
+-- repaint the buffer: a two-line header (file + help hint) then one aligned,
+-- colour-coded row per commit (sha · date · +N/-M · author · subject)
 function History:render()
-    local lines = { self.path, "Help: g?" }
-    local rows = {} ---@type { date_col: integer, date_end: integer }[]
+    local cells, w = {}, { sha = 0, date = 0, count = 0, author = 0 }
     for _, c in ipairs(self.commits) do
-        local line, dc, de = commit_row(c)
+        local cell = {
+            sha = c.short,
+            date = date_util.format(c.epoch, { relative = self.relative_dates }),
+            author = truncate(c.author, AUTHOR_MAX),
+            add = c.additions,
+            del = c.deletions,
+            subject = c.subject,
+        }
+        cells[#cells + 1] = cell
+        w.sha = math.max(w.sha, #cell.sha)
+        w.date = math.max(w.date, #cell.date)
+        w.count = math.max(w.count, #("+" .. cell.add .. " -" .. cell.del))
+        w.author = math.max(w.author, #cell.author)
+    end
+
+    local lines = { self.path, "Help: g?" }
+    local row_spans = {} ---@type ({ [1]: integer, [2]: integer, [3]: string }[])[]
+    for _, cell in ipairs(cells) do
+        local line, spans = build_row(cell, w)
         lines[#lines + 1] = line
-        rows[#rows + 1] = { date_col = dc, date_end = de }
+        row_spans[#row_spans + 1] = spans
     end
     self.lines = lines
 
@@ -114,11 +180,11 @@ function History:render()
     end
     paint(0, 0, #lines[1], "dipherPanelRoot")
     paint(1, 0, #lines[2], "dipherPanelHelp")
-    for i, r in ipairs(rows) do
+    for i, spans in ipairs(row_spans) do
         local row = commit_line(i) - 1
-        local sha = self.commits[i].short
-        paint(row, 0, #sha, "dipherPanelDir") -- short sha
-        paint(row, r.date_col, r.date_end, "dipherPanelHelp") -- date (muted)
+        for _, s in ipairs(spans) do
+            paint(row, s[1], s[2], s[3])
+        end
     end
 end
 
@@ -339,6 +405,17 @@ function History:close()
     end
     if self.on_close then
         self.on_close()
+    end
+end
+
+-- flip absolute <-> relative dates live, keeping the cursor put (runtime control;
+-- the default comes from config.relative_dates)
+function History:toggle_relative_dates()
+    self.relative_dates = not self.relative_dates
+    if self:is_open() then
+        local lnum = vim.api.nvim_win_get_cursor(self.winid)[1]
+        self:render()
+        pcall(vim.api.nvim_win_set_cursor, self.winid, { lnum, 0 })
     end
 end
 

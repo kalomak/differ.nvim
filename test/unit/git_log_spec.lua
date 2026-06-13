@@ -3,10 +3,10 @@ local log = require("dipher.git.log")
 local US = "\31"
 
 describe("git.log.log_args", function()
-    it("builds a single-file log invocation with the path after --", function()
+    it("builds a single-file --numstat log with the path after --", function()
         local a = log.log_args({ path = "lua/foo.lua" })
         assert.are.equal("log", a[1])
-        assert.are.equal("--date=short", a[3])
+        assert.are.equal("--numstat", a[2])
         assert.are.equal("--", a[#a - 1])
         assert.are.equal("lua/foo.lua", a[#a])
     end)
@@ -35,14 +35,19 @@ describe("git.log.log_args", function()
 end)
 
 describe("git.log.parse_log", function()
-    local function record(sha, short, author, date, subject)
-        return table.concat({ sha, short, author, date, subject }, US)
+    -- a commit header (the pretty-format line) followed by its --numstat rows
+    local function header(sha, short, author, epoch, subject)
+        return table.concat({ sha, short, author, epoch, subject }, US)
     end
 
-    it("parses one commit per line, newest first", function()
+    it("parses one commit per header, newest first, with numstat counts", function()
         local out = table.concat({
-            record("aaaa1111", "aaaa111", "Ada", "2026-06-13", "add the thing"),
-            record("bbbb2222", "bbbb222", "Bo", "2026-06-01", "seed the file"),
+            header("aaaa1111", "aaaa111", "Ada", "1781349032", "add the thing"),
+            "",
+            "12\t8\tlua/foo.lua",
+            header("bbbb2222", "bbbb222", "Bo", "1781318934", "seed the file"),
+            "",
+            "40\t0\tlua/foo.lua",
         }, "\n")
         local c = log.parse_log(out)
         assert.are.equal(2, #c)
@@ -50,20 +55,48 @@ describe("git.log.parse_log", function()
             sha = "aaaa1111",
             short = "aaaa111",
             author = "Ada",
-            date = "2026-06-13",
+            epoch = 1781349032,
             subject = "add the thing",
+            additions = 12,
+            deletions = 8,
         }, c[1])
         assert.are.equal("seed the file", c[2].subject)
+        assert.are.equal(40, c[2].additions)
+        assert.are.equal(0, c[2].deletions)
     end)
 
     it("returns an empty list for empty output", function()
         assert.are.same({}, log.parse_log(""))
     end)
 
-    it("skips blank lines and short records", function()
+    it("sums numstat across multiple files in one commit", function()
         local out = table.concat({
-            record("a", "a", "Ada", "2026-06-13", "ok"),
+            header("a", "a", "Ada", "1781349032", "two files"),
             "",
+            "3\t1\ta.lua",
+            "5\t2\tb.lua",
+        }, "\n")
+        local c = log.parse_log(out)
+        assert.are.equal(8, c[1].additions)
+        assert.are.equal(3, c[1].deletions)
+    end)
+
+    it("reads binary `-` numstat counts as zero", function()
+        local out = table.concat({
+            header("a", "a", "Ada", "1781349032", "add a png"),
+            "",
+            "-\t-\timg.png",
+        }, "\n")
+        local c = log.parse_log(out)
+        assert.are.equal(0, c[1].additions)
+        assert.are.equal(0, c[1].deletions)
+    end)
+
+    it("skips headers short of their five fields", function()
+        local out = table.concat({
+            header("a", "a", "Ada", "1781349032", "ok"),
+            "",
+            "1\t0\ta.lua",
             "garbage-without-separators",
         }, "\n")
         local c = log.parse_log(out)
@@ -72,7 +105,7 @@ describe("git.log.parse_log", function()
     end)
 
     it("preserves a subject that itself contains the field separator", function()
-        local out = record("a", "a", "Ada", "2026-06-13", "weird" .. US .. "subject")
+        local out = header("a", "a", "Ada", "1781349032", "weird" .. US .. "subject")
         local c = log.parse_log(out)
         assert.are.equal("weird" .. US .. "subject", c[1].subject)
     end)

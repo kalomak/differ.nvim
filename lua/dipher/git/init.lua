@@ -561,10 +561,12 @@ function M.history(opts)
     end
 
     local view ---@type dipher.View|nil -- the single diff view the panel drives
+    local cfg = require("dipher").get_config()
     return History.new({
         commits = commits,
         path = vim.fn.fnamemodify(file, ":~"),
-        quarter_scroll = require("dipher").get_config().keymaps.quarter_scroll,
+        quarter_scroll = cfg.keymaps.quarter_scroll,
+        relative_dates = cfg.relative_dates,
         position = opts.position,
         on_select = function(commit)
             local model = model_for(commit)

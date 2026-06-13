@@ -125,7 +125,7 @@ require("dipher").diff({
 ```lua
 require("dipher").setup({
   layout = "stacked",            -- "stacked" | "split", toggleable per-view
-  context = 3,                   -- context lines (math.huge = full file)
+  context = 10,                  -- context lines (math.huge = full file)
   deep_diff = {
     enabled = true,
     granularity = "word",        -- "word" | "char"
@@ -135,6 +135,10 @@ require("dipher").setup({
     inline = true,
     collapsed = false,
   },
+  keymaps = {
+    quarter_scroll = true,       -- f/b quarter-page scroll in diff windows (opt-out)
+  },
+  relative_dates = false,        -- "3 days ago" instead of YYYY-MM-DD wherever a date shows
   sidecar_bin = nil,             -- override the Go sidecar path (later phase)
 })
 ```
