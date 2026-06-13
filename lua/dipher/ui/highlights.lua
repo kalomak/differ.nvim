@@ -15,6 +15,9 @@ local LINKS = {
     dipherWordDelete = { link = "DiffText", bold = true },
     dipherWordAdd = { link = "DiffText", bold = true },
     dipherThreadRange = { link = "Visual" },
+    -- staged-hunk overlay (§8.1): a muted full-line bg replacing the vivid
+    -- add/delete so a staged hunk reads as set-aside rather than a live change
+    dipherStagedLine = { link = "CursorLine" },
     -- file panel chrome (§8.6)
     dipherPanelHeader = { link = "Title" },
     dipherPanelRoot = { link = "Directory" },
@@ -68,6 +71,8 @@ local function status_groups(p)
         dipherPanelUntracked = { fg = p.green },
         dipherPanelCountAdd = { fg = p.green },
         dipherPanelCountDelete = { fg = p.red },
+        -- the staged-hunk gutter glyph (§8.1): green for "in the index"
+        dipherStagedSign = { fg = p.green },
     }
 end
 

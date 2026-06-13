@@ -8,6 +8,7 @@
 
 local tree = require("dipher.panel.tree")
 local render = require("dipher.panel.render")
+local set_wo = require("dipher.util.win").set_local
 
 local ns = vim.api.nvim_create_namespace("dipher.panel")
 local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
@@ -300,8 +301,10 @@ function Panel:_open(entry, keep_focus)
     end
 end
 
--- <CR>/o: open a file, or toggle a directory's fold
-function Panel:select()
+-- <CR>/o: open a file, or toggle a directory's fold. `keep_focus` leaves the cursor
+-- in the diff window (used by the open-and-show entry so :Dipher lands you in the diff)
+---@param keep_focus boolean|nil
+function Panel:select(keep_focus)
     local m = self.meta[vim.api.nvim_win_get_cursor(self.winid)[1]]
     if not m then
         return
@@ -309,7 +312,7 @@ function Panel:select()
     if m.kind == "dir" then
         self:toggle_fold(m.path)
     elseif m.kind == "file" then
-        self:_open(m.entry)
+        self:_open(m.entry, keep_focus)
     end
 end
 
@@ -408,6 +411,7 @@ function Panel:show_help()
         "",
         " <CR> / o   open file / toggle fold",
         " ]f / [f    next / previous file",
+        " ]c / [c    next / previous hunk",
         " f / b      scroll diff down / up",
     }
     if self.actions then
@@ -450,16 +454,18 @@ end
 -- window appearance + buffer-local keymaps
 function Panel:_setup_window()
     local win = self.winid
-    vim.wo[win].number = false
-    vim.wo[win].relativenumber = false
-    vim.wo[win].signcolumn = "no"
-    vim.wo[win].foldcolumn = "0"
-    vim.wo[win].wrap = false
-    vim.wo[win].cursorline = true
+    -- window-local only: a plain vim.wo[win] write also sets the global default
+    -- (omits scope), leaking the panel's chrome onto every other window
+    set_wo(win, "number", false)
+    set_wo(win, "relativenumber", false)
+    set_wo(win, "signcolumn", "no")
+    set_wo(win, "foldcolumn", "0")
+    set_wo(win, "wrap", false)
+    set_wo(win, "cursorline", true)
     if self.position == "left" or self.position == "right" then
-        vim.wo[win].winfixwidth = true
+        set_wo(win, "winfixwidth", true)
     else
-        vim.wo[win].winfixheight = true
+        set_wo(win, "winfixheight", true)
     end
 
     local function map(lhs, fn, desc)
@@ -482,6 +488,14 @@ function Panel:_setup_window()
     map("[f", function()
         self:goto_file("prev")
     end, "previous file")
+    -- ]c / [c drive the diff view's hunk nav from the panel (bound buffer-locally
+    -- in the diff window too), so hunk stepping works from either side
+    map("]c", function()
+        require("dipher").goto_hunk("next")
+    end, "next hunk")
+    map("[c", function()
+        require("dipher").goto_hunk("prev")
+    end, "previous hunk")
     map("g?", function()
         self:show_help()
     end, "help")

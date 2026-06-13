@@ -5,6 +5,7 @@
 -- pure parsing/grammar lives in git/rev.lua; this module only does I/O + wiring
 
 local rev = require("dipher.git.rev")
+local patch = require("dipher.git.patch")
 
 local M = {}
 
@@ -282,6 +283,27 @@ function M.unstage_all(root)
     git({ "reset", "-q", "HEAD" }, root)
 end
 
+-- apply a single-hunk patch to the index (§8.1 hunk staging). `--unidiff-zero`
+-- because the patch carries no context (built straight from the hunk model);
+-- `--reverse` unstages. git apply is atomic, so a non-applying patch fails cleanly
+-- with stderr rather than half-writing. returns ok + git's stderr on failure
+---@param root string
+---@param text string  -- the unified diff to apply
+---@param reverse boolean
+---@return boolean ok, string|nil err
+function M.apply_patch(root, text, reverse)
+    local cmd = { "git", "apply", "--cached", "--unidiff-zero", "--whitespace=nowarn" }
+    if reverse then
+        cmd[#cmd + 1] = "--reverse"
+    end
+    cmd[#cmd + 1] = "-"
+    local res = vim.system(cmd, { cwd = root, stdin = text, text = true }):wait()
+    if res.code ~= 0 then
+        return false, res.stderr
+    end
+    return true
+end
+
 -- discard a file's changes: untracked or a staged-add drops the file (unstaging
 -- first if needed); anything tracked in HEAD reverts index + worktree to HEAD.
 -- destructive, so the panel confirms before calling this
@@ -409,7 +431,42 @@ function M.panel(opts)
     end
 
     local view ---@type dipher.View|nil -- the single diff view the panel drives
-    local panel = Panel.new({
+    local panel ---@type dipher.Panel|nil -- forward ref so staging can refresh it
+
+    -- hunk-level staging (§8.1): only plain modifications (status "M", same path
+    -- both sides) stage by hunk; renames/adds/deletes stay file-level in the panel.
+    -- the view keeps its diff frozen and marks staged hunks in place, so it tracks
+    -- per-hunk state and asks `apply` to patch one hunk: forward stages, `reverse`
+    -- unstages, and `offset` shifts the patch past already-staged hunks before it.
+    -- `initial` is every hunk's starting state (an unstaged diff opens unstaged, a
+    -- staged one opens staged). the panel refreshes its counts after each op
+    local stageable = is_worktree_status(source)
+    ---@param entry dipher.FileEntry
+    ---@return dipher.view.Staging|nil
+    local function stage_for(entry)
+        if not stageable or entry.status ~= "M" then
+            return nil
+        end
+        return {
+            initial = entry.staged and "staged" or "unstaged",
+            apply = function(model, hunk, offset, reverse)
+                local p = patch.hunk(model.path, hunk, model.old_text, model.new_text, offset)
+                local ok, err = M.apply_patch(root, p, reverse)
+                if not ok then
+                    local op = reverse and "unstage" or "stage"
+                    notify(("hunk %s failed: %s"):format(op, err or ""), vim.log.levels.ERROR)
+                end
+                return ok
+            end,
+            refresh = function()
+                if panel then
+                    panel:refresh()
+                end
+            end,
+        }
+    end
+
+    panel = Panel.new({
         sections = nonempty,
         root = vim.fn.fnamemodify(root, ":~"), -- ~-relative repo path for the header
         footer = footer_label(args, root),
@@ -421,10 +478,14 @@ function M.panel(opts)
         width = opts.width,
         on_select = function(entry)
             local model = model_for(entry)
+            local staging = stage_for(entry)
             if view and view:is_open() then
-                view:set_source(model)
+                view:set_source(model, staging)
             else
-                view = require("dipher").diff_model(model)
+                view = require("dipher").diff_model(
+                    model,
+                    { staging = staging, can_stage = stageable }
+                )
             end
         end,
         on_close = function()
@@ -434,7 +495,9 @@ function M.panel(opts)
         end,
     }):open()
     if opts.open_first then
-        panel:select() -- cursor sits on the first file row after :open
+        -- open the first file's diff and leave the cursor in it (not the panel), so
+        -- :Dipher drops you straight into reviewing
+        panel:select(true)
     end
     return panel
 end

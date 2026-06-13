@@ -351,6 +351,305 @@ describe(":Dipher panel staging (§8.6 slice C)", function()
     end)
 end)
 
+describe(":Dipher diff hunk staging (§8.1)", function()
+    local Panel = require("dipher.panel")
+
+    -- p:select returns focus to the panel, so the View lives in the origin window
+    local function view_in_origin(p)
+        vim.api.nvim_set_current_win(p.origin_win)
+        return require("dipher.view").current()
+    end
+    -- the staged (index) content of `path`
+    local function indexed(root, path)
+        return git(root, "show", ":" .. path)
+    end
+    local function worktree(root, path)
+        return table.concat(vim.fn.readfile(root .. "/" .. path), "\n") .. "\n"
+    end
+    local function keymaps(bufnr)
+        local lhs = {}
+        for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "n")) do
+            lhs[m.lhs] = true
+        end
+        return lhs
+    end
+
+    it("stages one hunk in place: index updated, worktree kept, diff stays frozen", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "1\n2\n3\n4\n5\n6\n7\n8\n")
+        git(root, "commit", "-q", "-am", "8 lines")
+        write(root .. "/a.lua", "1x\n2\n3\n4\n5\n6\n7\n8x\n") -- two far-apart edits
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.are.equal("unstaged", v.staging.initial) -- index↔worktree opens unstaged
+        assert.are.equal(2, #v.model.hunks) -- two distinct hunks (lines 1 and 8)
+        local before = vim.api.nvim_buf_get_lines(v.columns[1].bufnr, 0, -1, false)
+
+        -- cursor on the first hunk (buffer line 1), stage it
+        vim.api.nvim_win_set_cursor(p.origin_win, { 1, 0 })
+        v:stage_hunk()
+
+        -- the first edit is in the index; the second isn't; the worktree keeps both
+        assert.are.equal("1x\n2\n3\n4\n5\n6\n7\n8\n", indexed(root, "a.lua"))
+        assert.are.equal("1x\n2\n3\n4\n5\n6\n7\n8x\n", worktree(root, "a.lua"))
+        -- the diff didn't vanish or re-source: same hunks, same buffer, hunk 1 marked
+        assert.are.equal(2, #v.model.hunks)
+        assert.are.same(before, vim.api.nvim_buf_get_lines(v.columns[1].bufnr, 0, -1, false))
+        assert.is_true(v.staged_hunks[1])
+        assert.is_nil(v.staged_hunks[2])
+        p:close()
+    end)
+
+    it("unstages a staged hunk in place, then re-stages it", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        git(root, "add", "a.lua") -- whole change staged
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.are.equal("staged", v.staging.initial) -- a staged (HEAD↔index) diff
+        assert.is_true(v.staged_hunks[1]) -- opens marked staged
+        assert.are.equal("local x = 2\nreturn x\n", indexed(root, "a.lua"))
+
+        vim.api.nvim_win_set_cursor(p.origin_win, { 1, 0 })
+        v:unstage_hunk()
+        assert.are.equal(V1, indexed(root, "a.lua")) -- index reverted to HEAD
+        assert.is_false(v.staged_hunks[1]) -- now marked unstaged, still visible
+
+        v:stage_hunk() -- u then s on the same hunk: the mark toggles back
+        assert.are.equal("local x = 2\nreturn x\n", indexed(root, "a.lua"))
+        assert.is_true(v.staged_hunks[1])
+        p:close()
+    end)
+
+    it("offsets later hunks by earlier staged ones (line-count shift)", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "a\nb\nc\nd\n")
+        git(root, "commit", "-q", "-am", "abcd")
+        -- hunk 1 inserts two lines (changes the line count); hunk 2 edits d
+        write(root .. "/a.lua", "a\nINS1\nINS2\nb\nc\nD\n")
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.are.equal(2, #v.model.hunks)
+
+        vim.api.nvim_set_current_win(p.origin_win)
+        vim.api.nvim_win_set_cursor(p.origin_win, { 2, 0 }) -- the insertion hunk
+        v:stage_hunk()
+        assert.are.equal("a\nINS1\nINS2\nb\nc\nd\n", indexed(root, "a.lua"))
+
+        -- staging hunk 2 now must shift past the +2 lines hunk 1 added, or git apply
+        -- would reject the patch (its frozen line numbers are two short)
+        vim.api.nvim_set_current_win(p.origin_win)
+        vim.api.nvim_win_set_cursor(p.origin_win, { 6, 0 }) -- the d -> D hunk
+        v:stage_hunk()
+        assert.are.equal("a\nINS1\nINS2\nb\nc\nD\n", indexed(root, "a.lua"))
+        p:close()
+    end)
+
+    it("lands the cursor on the first hunk, not the leading context", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "1\n2\n3\n4\n5\n6\n")
+        git(root, "commit", "-q", "-am", "six")
+        write(root .. "/a.lua", "1\n2\n3\nX\n5\n6\n") -- only line 4 changes
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        local cur = vim.api.nvim_win_get_cursor(p.origin_win)[1]
+        assert.is_not_nil(v.columns[1].map.lines[cur].hunk) -- on a hunk, not context
+        assert.are.equal(v:_first_review_line(v.columns[1]), cur)
+        p:close()
+    end)
+
+    it("lands on the first unstaged hunk, skipping staged ones", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "1\n2\n3\n4\n5\n6\n7\n8\n")
+        git(root, "commit", "-q", "-am", "8 lines")
+        write(root .. "/a.lua", "1x\n2\n3\n4\n5\n6\n7\n8x\n") -- hunks at lines 1 and 8
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.are.equal(1, v:_first_review_line(v.columns[1])) -- both unstaged -> hunk 1
+
+        vim.api.nvim_win_set_cursor(p.origin_win, { 1, 0 })
+        v:stage_hunk() -- stage hunk 1; the next place to review is hunk 2 (buffer line 9)
+        assert.are.equal(9, v:_first_review_line(v.columns[1]))
+        p:close()
+    end)
+
+    it("reviews hunk-by-hunk: s stages then advances, stepping to the next file", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "1\n2\n3\n4\n5\n6\n7\n8\n")
+        write(root .. "/z.lua", "z1\nz2\n")
+        git(root, "add", "z.lua")
+        git(root, "commit", "-q", "-am", "two files")
+        write(root .. "/a.lua", "1x\n2\n3\n4\n5\n6\n7\n8x\n") -- a.lua: two hunks
+        write(root .. "/z.lua", "z1x\nz2\n") -- z.lua: one hunk
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.are.equal("a.lua", v.model.path)
+        assert.are.equal(1, vim.api.nvim_win_get_cursor(p.origin_win)[1]) -- on hunk 1
+
+        v:stage_hunk() -- stage hunk 1; cursor stays put, marked
+        assert.is_true(v.staged_hunks[1])
+        assert.are.equal(1, vim.api.nvim_win_get_cursor(p.origin_win)[1])
+
+        v:stage_hunk() -- second s: advance to hunk 2 (buffer line 9)
+        assert.are.equal(9, vim.api.nvim_win_get_cursor(p.origin_win)[1])
+
+        v:stage_hunk() -- stage hunk 2
+        assert.is_true(v.staged_hunks[2])
+
+        v:stage_hunk() -- second s on the last hunk: step to the next file
+        assert.are.equal("z.lua", v.model.path)
+        assert.is_not_nil(v.columns[1].map.lines[vim.api.nvim_win_get_cursor(p.origin_win)[1]].hunk)
+        p:close()
+    end)
+
+    it("reviews backward: u unstages then retreats, stepping to the previous file", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "1\n2\n3\n4\n5\n6\n7\n8\n")
+        write(root .. "/z.lua", "z1\nz2\n")
+        git(root, "add", "z.lua")
+        git(root, "commit", "-q", "-am", "two files")
+        write(root .. "/a.lua", "1x\n2\n3\n4\n5\n6\n7\n8x\n") -- a.lua: two hunks
+        write(root .. "/z.lua", "z1x\nz2\n") -- z.lua: one hunk
+        git(root, "add", "a.lua", "z.lua") -- stage both: a staged (HEAD↔index) review
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        v:step_file("next") -- move forward to z.lua (the last file)
+        assert.are.equal("z.lua", v.model.path)
+
+        v:unstage_hunk() -- unstage z.lua's hunk; cursor stays, now unstaged
+        assert.is_false(v.staged_hunks[1])
+
+        v:unstage_hunk() -- second u: no earlier hunk -> step back to a.lua's last hunk
+        assert.are.equal("a.lua", v.model.path)
+        assert.are.equal(9, vim.api.nvim_win_get_cursor(p.origin_win)[1]) -- last hunk start
+        p:close()
+    end)
+
+    it("stages and unstages every hunk with S / U", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "a\nb\nc\nd\n")
+        git(root, "commit", "-q", "-am", "abcd")
+        -- an insertion plus a later edit: two hunks, line-count-shifting
+        write(root .. "/a.lua", "a\nINS1\nINS2\nb\nc\nD\n")
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.are.equal(2, #v.model.hunks)
+
+        v:stage_all() -- both hunks into the index in one go
+        assert.are.equal("a\nINS1\nINS2\nb\nc\nD\n", indexed(root, "a.lua"))
+        assert.is_true(v.staged_hunks[1])
+        assert.is_true(v.staged_hunks[2])
+
+        v:unstage_all() -- back out of the index entirely
+        assert.are.equal("a\nb\nc\nd\n", indexed(root, "a.lua")) -- == HEAD
+        assert.is_false(v.staged_hunks[1])
+        assert.is_false(v.staged_hunks[2])
+        p:close()
+    end)
+
+    it("binds s/u/S/U in the diff window for a worktree source, not a rev-pair", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local lhs = keymaps(view_in_origin(p).columns[1].bufnr)
+        for _, k in ipairs({ "s", "u", "S", "U" }) do
+            assert.is_true(lhs[k])
+        end
+        p:close()
+
+        git(root, "commit", "-q", "-am", "edit") -- now a clean worktree
+        git_src.panel({ rev = "HEAD~1..HEAD", open_first = true })
+        local p2 = Panel.current()
+        local lhs2 = keymaps(view_in_origin(p2).columns[1].bufnr)
+        assert.is_nil(lhs2["s"]) -- rev-pair sources aren't stageable
+        assert.is_nil(lhs2["u"])
+        assert.is_nil(lhs2["S"])
+        assert.is_nil(lhs2["U"])
+        p2:close()
+    end)
+end)
+
+describe(":Dipher panel <-> diff wiring", function()
+    local Panel = require("dipher.panel")
+
+    it("opens with the cursor in the diff window, not the panel", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        assert.are.equal(p.origin_win, vim.api.nvim_get_current_win()) -- in the diff
+        assert.are_not.equal(p.winid, vim.api.nvim_get_current_win())
+        p:close()
+    end)
+
+    it("binds ]c/[c in the panel, driving the diff view's hunk nav", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "1\n2\n3\n4\n5\n6\n7\n8\n")
+        git(root, "commit", "-q", "-am", "8 lines")
+        write(root .. "/a.lua", "1x\n2\n3\n4\n5\n6\n7\n8x\n") -- two hunks
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+
+        local lhs = {}
+        for _, m in ipairs(vim.api.nvim_buf_get_keymap(p.bufnr, "n")) do
+            lhs[m.lhs] = true
+        end
+        assert.is_true(lhs["]c"])
+        assert.is_true(lhs["[c"])
+
+        -- from the panel, ]c moves the diff window's cursor to the next hunk
+        vim.api.nvim_set_current_win(p.winid)
+        vim.api.nvim_win_set_cursor(p.origin_win, { 1, 0 })
+        require("dipher").goto_hunk("next")
+        assert.are.equal(9, vim.api.nvim_win_get_cursor(p.origin_win)[1]) -- second hunk
+        p:close()
+    end)
+
+    it("gofile works from the panel, acting on the driven view", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        vim.api.nvim_set_current_win(p.winid) -- focus the panel
+        assert.is_not_nil(require("dipher").active_view())
+
+        require("dipher").jump_to_file()
+        local cur = vim.api.nvim_get_current_buf()
+        assert.are.equal("a.lua", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(cur), ":t"))
+        assert.are.equal("", vim.bo[cur].buftype) -- the real file
+        assert.is_nil(Panel.current()) -- the whole session was torn down
+    end)
+end)
+
 describe(":Dipher (open_first)", function()
     local Panel = require("dipher.panel")
 

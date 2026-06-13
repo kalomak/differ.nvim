@@ -30,9 +30,10 @@ end
 ---@field context integer|nil
 
 -- open a View from an already-built DiffModel. the git frontend and panel use
--- this; `opts` overrides the layout/context defaults per-view
+-- this; `opts` overrides the layout/context defaults and carries the hunk-staging
+-- capability (§8.1) for worktree-status panels
 ---@param model dipher.DiffModel
----@param opts { layout?: dipher.Layout, context?: integer }|nil
+---@param opts { layout?: dipher.Layout, context?: integer, staging?: dipher.view.Staging, can_stage?: boolean }|nil
 ---@return dipher.View
 function M.diff_model(model, opts)
     require("dipher.ui.highlights").setup()
@@ -44,6 +45,8 @@ function M.diff_model(model, opts)
             context = opts.context or cfg.context,
             deep_diff = cfg.deep_diff,
             keymaps = cfg.keymaps,
+            staging = opts.staging,
+            can_stage = opts.can_stage,
         })
         :open()
 end
@@ -90,15 +93,45 @@ function M.close()
     require("dipher.git").close()
 end
 
+-- the diff view to act on: the one under the cursor, or, when focused in the file
+-- panel, the view the panel drives (its origin window's buffer). lets the diff
+-- commands (gofile, hunk nav) work from either the diff window or the panel
+---@return dipher.View|nil
+function M.active_view()
+    local View = require("dipher.view")
+    local view = View.current()
+    if view then
+        return view
+    end
+    local panel = require("dipher.panel").current()
+    local origin = panel and panel.origin_win
+    if origin and vim.api.nvim_win_is_valid(origin) then
+        return View.for_buf(vim.api.nvim_win_get_buf(origin))
+    end
+    return nil
+end
+
 -- jump-to-file (§8.1, the `de` keymap): from the diff under the cursor, close the
--- session and open the real file on disk at the mapped line. a no-op with a notice
--- when the cursor isn't in a dipher diff
+-- session and open the real file on disk at the mapped line. works from the panel
+-- too (acts on the driven view); a no-op with a notice when no diff is active
 function M.jump_to_file()
-    local view = require("dipher.view").current()
+    local view = M.active_view()
     if not view then
         return vim.notify("dipher: no diff view here", vim.log.levels.WARN)
     end
     view:jump_to_file()
+end
+
+-- ]c / [c from the panel: move the driven diff view to the next/previous hunk
+-- (in the diff window already bound buffer-locally). a no-op with a notice when no
+-- diff is active
+---@param direction "next"|"prev"
+function M.goto_hunk(direction)
+    local view = M.active_view()
+    if not view then
+        return vim.notify("dipher: no diff view here", vim.log.levels.WARN)
+    end
+    view:goto_hunk(direction)
 end
 
 return M

@@ -11,10 +11,30 @@ local statuscolumn = require("dipher.ui.statuscolumn")
 local nav = require("dipher.nav")
 
 local ns = vim.api.nvim_create_namespace("dipher")
+local staged_ns = vim.api.nvim_create_namespace("dipher.staging")
 local STATUSCOLUMN_EXPR = '%!v:lua.require("dipher.ui.statuscolumn").render()'
 local FOLDTEXT_EXPR = 'v:lua.require("dipher.ui.foldtext").render()'
 local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
 local CTRL_U = vim.api.nvim_replace_termcodes("<C-u>", true, false, true)
+
+-- the window-local options dipher overrides for a diff window (_setup_window +
+-- _apply_folds); reset to their global default when jumping to the real file (§8.1)
+-- so the dressing doesn't leak onto it
+local WINDOW_DRESSING = {
+    "statuscolumn",
+    "number",
+    "relativenumber",
+    "signcolumn",
+    "foldcolumn",
+    "wrap",
+    "scrollbind",
+    "foldmethod",
+    "foldtext",
+    "foldenable",
+    "foldlevel",
+}
+
+local set_wo = require("dipher.util.win").set_local
 
 ---@type table<integer, dipher.View> -- bufnr -> owning view, for command dispatch
 local by_buf = {}
@@ -25,6 +45,18 @@ local by_buf = {}
 ---@field map dipher.LineMap
 ---@field side dipher.ColumnSide
 
+-- the hunk-staging capability the git frontend supplies per source (§8.1). the
+-- view keeps its diff frozen and marks staged hunks in place rather than re-reading
+-- git, so it tracks per-hunk state and calls `apply` to patch one hunk: `reverse`
+-- false stages, true unstages, `offset` shifts past already-staged hunks before it.
+-- `initial` is every hunk's opening state (an unstaged diff opens unstaged, a staged
+-- one opens staged). `apply` patches one hunk and returns ok; `refresh` repaints the
+-- panel counts and is called once after a single toggle or a whole S/U batch
+---@class dipher.view.Staging
+---@field initial "staged"|"unstaged"
+---@field apply fun(model: dipher.DiffModel, hunk: dipher.Hunk, offset: integer, reverse: boolean): boolean
+---@field refresh fun()
+
 ---@class dipher.View
 ---@field columns dipher.ViewColumn[]
 ---@field model dipher.DiffModel
@@ -32,13 +64,24 @@ local by_buf = {}
 ---@field context integer
 ---@field deep_diff table
 ---@field keymaps table
+---@field can_stage boolean  -- session-level: bind s/u (worktree-status panels)
+---@field staging dipher.view.Staging|nil  -- per-source capability (nil off-side)
+---@field staged_hunks table<integer, boolean>  -- hunk index -> staged, for marking
 local View = {}
 View.__index = View
+
+---@class dipher.view.Opts
+---@field layout dipher.Layout
+---@field context integer
+---@field deep_diff table
+---@field keymaps? table
+---@field staging? dipher.view.Staging
+---@field can_stage? boolean
 
 -- build a view for a model. buffers and data are created here; windows are not
 -- touched until :open(), so a View can be constructed headlessly for tests
 ---@param model dipher.DiffModel
----@param opts { layout: dipher.Layout, context: integer, deep_diff: table, keymaps?: table }
+---@param opts dipher.view.Opts
 ---@return dipher.View
 function View.new(model, opts)
     local self = setmetatable({
@@ -48,9 +91,24 @@ function View.new(model, opts)
         context = opts.context,
         deep_diff = opts.deep_diff,
         keymaps = opts.keymaps or {},
+        can_stage = opts.can_stage or false,
+        staging = opts.staging,
+        staged_hunks = {},
     }, View)
+    self:_init_staged()
     self:rerender(opts)
     return self
+end
+
+-- seed per-hunk staged state for the current source: a staged diff (HEAD↔index)
+-- opens with every hunk staged, an unstaged diff (index↔worktree) with none
+function View:_init_staged()
+    self.staged_hunks = {}
+    if self.staging and self.staging.initial == "staged" then
+        for i = 1, #self.model.hunks do
+            self.staged_hunks[i] = true
+        end
+    end
 end
 
 -- a stable, file-shaped buffer name so the statusline/winbar shows the file path
@@ -163,7 +221,48 @@ function View:rerender(opts)
         self:_discard(self.columns[i])
         self.columns[i] = nil
     end
+    self:_paint_staged() -- overlay marks for staged hunks (no-op off a staging view)
     self:_apply_folds() -- no-op until windows exist (open / relayout re-apply)
+end
+
+-- overlay the staged-hunk marks (§8.1): a muted full-line bg over every line of a
+-- staged hunk plus the gutter glyph. repainted on every render and on each toggle;
+-- buffer content is untouched (the diff stays frozen). a no-op off a staging view,
+-- which leaves the gutter at its normal width
+function View:_paint_staged()
+    if not self.can_stage then
+        return
+    end
+    for _, col in ipairs(self.columns) do
+        vim.api.nvim_buf_clear_namespace(col.bufnr, staged_ns, 0, -1)
+        local staged_lines = {}
+        for i, line in ipairs(col.map.lines) do
+            if line.hunk and self.staged_hunks[line.hunk] then
+                vim.api.nvim_buf_set_extmark(col.bufnr, staged_ns, i - 1, 0, {
+                    line_hl_group = "dipherStagedLine",
+                    priority = 150, -- above the add/delete bg (100), under word spans (200)
+                })
+                staged_lines[i] = true
+            end
+        end
+        statuscolumn.set_staged(col.bufnr, staged_lines)
+    end
+end
+
+-- the net line-count delta of the staged hunks before `idx`: the frozen view's
+-- line numbers are from open time, but git applies against the live index, where
+-- each already-staged earlier hunk has shifted positions by its added/removed lines
+---@param idx integer
+---@return integer
+function View:_stage_offset(idx)
+    local off = 0
+    for j = 1, idx - 1 do
+        if self.staged_hunks[j] then
+            local h = self.model.hunks[j]
+            off = off + (h.new_count - h.old_count)
+        end
+    end
+    return off
 end
 
 -- (re)create the native folds for each column's window from its fold ranges, then
@@ -174,10 +273,10 @@ function View:_apply_folds()
     for _, col in ipairs(self.columns) do
         local win = col.winid
         if win and vim.api.nvim_win_is_valid(win) then
-            vim.wo[win].foldmethod = "manual"
-            vim.wo[win].foldtext = FOLDTEXT_EXPR
-            vim.wo[win].foldenable = true
-            vim.wo[win].foldlevel = 0 -- collapsed by default
+            set_wo(win, "foldmethod", "manual")
+            set_wo(win, "foldtext", FOLDTEXT_EXPR)
+            set_wo(win, "foldenable", true)
+            set_wo(win, "foldlevel", 0) -- collapsed by default
             vim.api.nvim_win_call(win, function()
                 vim.cmd("silent! normal! zE") -- drop existing folds before rebuilding
                 for _, f in ipairs(col.folds or {}) do
@@ -196,6 +295,14 @@ function View.current()
     return by_buf[vim.api.nvim_get_current_buf()]
 end
 
+-- the view owning `bufnr`, if any. lets the panel reach the diff view it drives
+-- (via its origin window's buffer) so panel-side keys act on that view
+---@param bufnr integer
+---@return dipher.View|nil
+function View.for_buf(bufnr)
+    return by_buf[bufnr]
+end
+
 -- whether the view's primary window is still alive (panel uses this to decide
 -- between re-sourcing in place and opening fresh)
 ---@return boolean
@@ -207,11 +314,16 @@ end
 -- swap the diffed file in place: same windows/layout/context, new model. the
 -- panel calls this when a different file is selected so the View is re-sourced,
 -- not recreated (§8.6 separation of concerns). column count is layout-determined,
--- so it never changes here, no relayout
+-- so it never changes here, no relayout. `staging` rides along because the stage
+-- direction is per-file (a staged entry unstages, an unstaged one stages)
 ---@param model dipher.DiffModel
-function View:set_source(model)
+---@param staging dipher.view.Staging|nil
+function View:set_source(model, staging)
     self.model = model
+    self.staging = staging
+    self:_init_staged() -- a new file: reseed staged state from the fresh git read
     self:rerender({ layout = self.layout, context = self.context, deep_diff = self.deep_diff })
+    self:_focus_first_hunk() -- land on the first unstaged hunk of the new file
 end
 
 -- swap the layout for this view (a pure re-render behind the map contract, §8.3).
@@ -252,13 +364,13 @@ end
 ---@param bufnr integer
 function View:_setup_window(winid, bufnr)
     vim.api.nvim_win_set_buf(winid, bufnr)
-    vim.wo[winid].number = false
-    vim.wo[winid].relativenumber = false
-    vim.wo[winid].signcolumn = "no"
-    vim.wo[winid].foldcolumn = "0"
-    vim.wo[winid].wrap = false
-    vim.wo[winid].scrollbind = false -- cleared default; split re-enables it in :open
-    vim.wo[winid].statuscolumn = STATUSCOLUMN_EXPR
+    set_wo(winid, "number", false)
+    set_wo(winid, "relativenumber", false)
+    set_wo(winid, "signcolumn", "no")
+    set_wo(winid, "foldcolumn", "0")
+    set_wo(winid, "wrap", false)
+    set_wo(winid, "scrollbind", false) -- cleared default; split re-enables it in :open
+    set_wo(winid, "statuscolumn", STATUSCOLUMN_EXPR)
     vim.keymap.set("n", "]c", function()
         self:goto_hunk("next")
     end, { buffer = bufnr, desc = "dipher: next hunk" })
@@ -287,6 +399,24 @@ function View:_setup_window(winid, bufnr)
         vim.keymap.set("n", "b", function()
             self:quarter_scroll("up")
         end, { buffer = bufnr, desc = "dipher: scroll up a quarter page" })
+    end
+    -- s / u stage / unstage the hunk under the cursor (§8.1), hunk-level here vs
+    -- file-level in the panel. bound for the whole worktree-status session; the
+    -- per-file direction is checked at call time (the buffer is read-only, so
+    -- shadowing native substitute / undo is harmless)
+    if self.can_stage then
+        vim.keymap.set("n", "s", function()
+            self:stage_hunk()
+        end, { buffer = bufnr, desc = "dipher: stage hunk" })
+        vim.keymap.set("n", "u", function()
+            self:unstage_hunk()
+        end, { buffer = bufnr, desc = "dipher: unstage hunk" })
+        vim.keymap.set("n", "S", function()
+            self:stage_all()
+        end, { buffer = bufnr, desc = "dipher: stage all hunks" })
+        vim.keymap.set("n", "U", function()
+            self:unstage_all()
+        end, { buffer = bufnr, desc = "dipher: unstage all hunks" })
     end
 end
 
@@ -341,6 +471,209 @@ function View:goto_hunk(direction)
     end
 end
 
+-- the buffer line to land on when a file opens (§8.1): the start of the first
+-- unstaged hunk, the natural place to begin reviewing, falling back to the first
+-- hunk when everything is already staged, or nil for a file with no hunks
+---@param col dipher.ViewColumn
+---@return integer|nil
+function View:_first_review_line(col)
+    local first_hunk
+    for i, line in ipairs(col.map.lines) do
+        if line.hunk then
+            first_hunk = first_hunk or i
+            if not self.staged_hunks[line.hunk] then
+                return i
+            end
+        end
+    end
+    return first_hunk
+end
+
+-- move the primary window's cursor to the first unstaged hunk (or first hunk). run
+-- on open and on every file switch so ]f / [f and selecting a file drop you on the
+-- first thing to review rather than wherever the cursor happened to be
+function View:_focus_first_hunk()
+    local col = self.columns[1]
+    if not (col and col.winid and vim.api.nvim_win_is_valid(col.winid)) then
+        return
+    end
+    local lnum = self:_first_review_line(col)
+    if lnum then
+        pcall(vim.api.nvim_win_set_cursor, col.winid, { lnum, 0 })
+    end
+end
+
+-- the buffer line of the last hunk's start, where the backward review flow lands
+-- when stepping into a previous file (so u keeps moving backward through it)
+---@param col dipher.ViewColumn
+---@return integer|nil
+function View:_last_hunk_line(col)
+    local last = #self.model.hunks
+    if last == 0 then
+        return nil
+    end
+    for i, line in ipairs(col.map.lines) do
+        if line.hunk == last then
+            return i
+        end
+    end
+    return nil
+end
+
+-- move the primary window's cursor to the last hunk (backward file-step landing)
+function View:_focus_last_hunk()
+    local col = self.columns[1]
+    if not (col and col.winid and vim.api.nvim_win_is_valid(col.winid)) then
+        return
+    end
+    local lnum = self:_last_hunk_line(col)
+    if lnum then
+        pcall(vim.api.nvim_win_set_cursor, col.winid, { lnum, 0 })
+    end
+end
+
+-- the index of the hunk the cursor sits in, via the focused column's map (§8.1
+-- staging). nil on a context / meta / unchanged line that belongs to no hunk
+---@return integer|nil
+function View:_hunk_index_under_cursor()
+    local col = self:_focused_column()
+    local win = col.winid or vim.api.nvim_get_current_win()
+    local line = col.map.lines[vim.api.nvim_win_get_cursor(win)[1]]
+    return line and line.hunk or nil
+end
+
+-- patch hunk `idx` to `want_staged` in the index from the frozen hunk model (never
+-- buffer text), shifted past the hunks staged before it, and mark it. no panel
+-- refresh / repaint, so callers can batch. returns whether it changed
+---@param idx integer
+---@param want_staged boolean
+---@return boolean
+function View:_apply_hunk(idx, want_staged)
+    if (self.staged_hunks[idx] or false) == want_staged then
+        return false
+    end
+    local offset = self:_stage_offset(idx)
+    -- reverse unstages: we patch away a change currently in the index
+    if self.staging.apply(self.model, self.model.hunks[idx], offset, not want_staged) then
+        self.staged_hunks[idx] = want_staged
+        return true
+    end
+    return false
+end
+
+-- s: stage the hunk under the cursor, or advance if there's nothing to stage here.
+-- the review flow (§8.1): the first s on a hunk stages it (staying put so the mark
+-- is visible), a second s (now staged) moves to the next hunk, and at the last hunk
+-- it steps to the next file, which opens on its first unstaged hunk. so repeated s
+-- walks the whole change set, accepting hunk by hunk
+function View:stage_hunk()
+    if not (self.can_stage and self.staging) then
+        return vim.notify("dipher: hunk staging isn't available here", vim.log.levels.WARN)
+    end
+    local idx = self:_hunk_index_under_cursor()
+    if idx and not (self.staged_hunks[idx] or false) then
+        self:_toggle_hunk(true)
+    else
+        self:_advance_review()
+    end
+end
+
+-- move to the next hunk; at the last hunk, step to the next file (the second-tap of
+-- s, and the seam that makes the review flow continuous across files)
+function View:_advance_review()
+    local col = self:_focused_column()
+    local win = col.winid or vim.api.nvim_get_current_win()
+    local target = nav.next_hunk(col.map, vim.api.nvim_win_get_cursor(win)[1])
+    if target then
+        vim.api.nvim_win_set_cursor(win, { target, 0 })
+    else
+        self:step_file("next")
+    end
+end
+
+-- u: the mirror of s. unstage the staged hunk under the cursor, or retreat: a
+-- second u moves to the previous hunk, and at the first hunk it steps to the
+-- previous file landing on its last hunk, so repeated u walks the change set
+-- backward, undoing hunk by hunk
+function View:unstage_hunk()
+    if not (self.can_stage and self.staging) then
+        return vim.notify("dipher: hunk staging isn't available here", vim.log.levels.WARN)
+    end
+    local idx = self:_hunk_index_under_cursor()
+    if idx and (self.staged_hunks[idx] or false) then
+        self:_toggle_hunk(false)
+    else
+        self:_retreat_review()
+    end
+end
+
+-- move to the previous hunk; at the first hunk, step to the previous file and land
+-- on its last hunk (the backward seam, mirroring _advance_review's forward one)
+function View:_retreat_review()
+    local col = self:_focused_column()
+    local win = col.winid or vim.api.nvim_get_current_win()
+    local target = nav.prev_hunk(col.map, vim.api.nvim_win_get_cursor(win)[1])
+    if target then
+        vim.api.nvim_win_set_cursor(win, { target, 0 })
+    else
+        local before = self.model.path
+        self:step_file("prev")
+        if self.model.path ~= before then -- only when a previous file actually opened
+            self:_focus_last_hunk()
+        end
+    end
+end
+
+-- toggle the staged state of the hunk under the cursor (§8.1), marking it in place
+-- rather than re-reading: the diff stays put and the opposite key (u after s) keeps
+-- working on it
+---@param want_staged boolean
+function View:_toggle_hunk(want_staged)
+    if not (self.can_stage and self.staging) then
+        return vim.notify("dipher: hunk staging isn't available here", vim.log.levels.WARN)
+    end
+    local idx = self:_hunk_index_under_cursor()
+    if not idx then
+        return vim.notify("dipher: no hunk under the cursor", vim.log.levels.WARN)
+    end
+    if (self.staged_hunks[idx] or false) == want_staged then
+        return vim.notify("dipher: hunk already " .. (want_staged and "staged" or "unstaged"))
+    end
+    if self:_apply_hunk(idx, want_staged) then
+        self.staging.refresh()
+        self:_paint_staged()
+    end
+end
+
+-- S: stage every hunk in the file
+function View:stage_all()
+    self:_toggle_all(true)
+end
+
+-- U: unstage every hunk in the file
+function View:unstage_all()
+    self:_toggle_all(false)
+end
+
+-- stage / unstage every hunk (§8.1). forward order keeps the running offset correct
+-- as the index shifts under each apply; the panel refreshes once after the batch
+---@param want_staged boolean
+function View:_toggle_all(want_staged)
+    if not (self.can_stage and self.staging) then
+        return vim.notify("dipher: hunk staging isn't available here", vim.log.levels.WARN)
+    end
+    local changed = false
+    for i = 1, #self.model.hunks do
+        if self:_apply_hunk(i, want_staged) then
+            changed = true
+        end
+    end
+    if changed then
+        self.staging.refresh()
+        self:_paint_staged()
+    end
+end
+
 -- jump-to-file (§8.1, the `de` verb): leave the diff and open the real file on
 -- disk at the line under the cursor, mapped to its new-side line (§6.2). the
 -- focused diff window is reused for the file and survives; the rest of the
@@ -363,8 +696,15 @@ function View:jump_to_file()
         or vim.api.nvim_get_current_win()
     local target = nav.file_line(col.map, vim.api.nvim_win_get_cursor(win)[1])
 
-    -- load the real file into the focused window, which survives the teardown
+    -- load the real file into the focused window, which survives the teardown. shed
+    -- dipher's window dressing first (each option back to its global default) so it
+    -- doesn't leak onto the real file, e.g. the custom statuscolumn rendering a blank
+    -- gutter against no rail cache. done before :edit so filetype autocmds (folds,
+    -- treesitter) still win
     vim.api.nvim_set_current_win(win)
+    for _, opt in ipairs(WINDOW_DRESSING) do
+        set_wo(win, opt, vim.go[opt])
+    end
     vim.cmd.edit(vim.fn.fnameescape(abs))
     if target then
         pcall(vim.api.nvim_win_set_cursor, win, { target, 0 })
@@ -405,7 +745,7 @@ function View:_relayout()
 
     if #self.columns > 1 then
         for _, col in ipairs(self.columns) do
-            vim.wo[col.winid].scrollbind = true
+            set_wo(col.winid, "scrollbind", true)
         end
         vim.api.nvim_set_current_win(self.columns[1].winid)
         vim.cmd("syncbind")
@@ -417,6 +757,7 @@ end
 ---@return dipher.View
 function View:open()
     self:_relayout()
+    self:_focus_first_hunk() -- start on the first unstaged hunk, not line 1
     return self
 end
 

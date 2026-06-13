@@ -69,6 +69,27 @@ describe("view stacked", function()
     end)
 end)
 
+describe("view window options", function()
+    it("sets gutter/fold options window-locally, not on the global default", function()
+        local g_statuscolumn, g_number, g_wrap = vim.go.statuscolumn, vim.go.number, vim.go.wrap
+        local v = View.new(model("a\nb\n", "a\nB\n"), {
+            layout = "stacked",
+            context = math.huge,
+            deep_diff = { enabled = true },
+        })
+        v:open()
+        local win = v.columns[1].winid
+        -- the window carries dipher's dressing...
+        assert.is_truthy(vim.wo[win].statuscolumn:find("dipher", 1, true))
+        assert.is_false(vim.wo[win].number)
+        -- ...but the global defaults are untouched, so other windows are unaffected
+        assert.are.equal(g_statuscolumn, vim.go.statuscolumn)
+        assert.are.equal(g_number, vim.go.number)
+        assert.are.equal(g_wrap, vim.go.wrap)
+        v:close()
+    end)
+end)
+
 describe("view split", function()
     it("opens a scroll-bound pair with per-side highlights", function()
         local v = View.new(model("a\nM\nb\n", "a\nX\nb\n"), {
@@ -389,6 +410,8 @@ describe("view jump-to-file", function()
         assert.are.same({ "a", "B", "c" }, vim.api.nvim_buf_get_lines(cur, 0, -1, false))
         assert.are.equal(2, vim.api.nvim_win_get_cursor(0)[1])
         assert.is_false(vim.api.nvim_buf_is_valid(buf)) -- the diff buffer is gone
+        -- dipher's custom gutter is shed, so the real file's line numbers render
+        assert.are.equal("", vim.wo[win].statuscolumn)
     end)
 
     it("notifies and stays put for a source with no root", function()

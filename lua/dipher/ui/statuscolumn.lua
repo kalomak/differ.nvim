@@ -3,8 +3,13 @@
 
 local M = {}
 
+local STAGED_GLYPH = "▌"
+
 ---@type table<integer, string[]> -- bufnr -> pre-formatted rail string per lnum
 local rails = {}
+
+---@type table<integer, table<integer, boolean>> -- bufnr -> set of staged lnums
+local staged = {}
 
 -- pre-format the gutter string for every line of a column from its map. pure, so
 -- the statuscolumn callback only does an O(1) index per redraw (§11). a unified
@@ -50,13 +55,24 @@ function M.set(bufnr, strings)
     rails[bufnr] = strings
 end
 
+-- register a buffer's staged lines (§8.1 hunk staging). presence of an entry (even
+-- empty) reserves a one-cell staged gutter so the rail width is stable as hunks
+-- toggle; the glyph paints on staged lines. unset for non-staging views
+---@param bufnr integer
+---@param lines table<integer, boolean>|nil
+function M.set_staged(bufnr, lines)
+    staged[bufnr] = lines
+end
+
 -- drop a buffer's cached rail strings
 ---@param bufnr integer
 function M.clear(bufnr)
     rails[bufnr] = nil
+    staged[bufnr] = nil
 end
 
--- statuscolumn callback: return the rail string for the current line
+-- statuscolumn callback: return the rail string for the current line, prefixed by
+-- the staged-gutter cell when this is a staging-capable view
 ---@return string
 function M.render()
     local buf = vim.g.statusline_winid and vim.api.nvim_win_get_buf(vim.g.statusline_winid)
@@ -64,7 +80,12 @@ function M.render()
     if not cache then
         return ""
     end
-    return cache[vim.v.lnum] or ""
+    local s = cache[vim.v.lnum] or ""
+    local sset = buf and staged[buf]
+    if sset then
+        return (sset[vim.v.lnum] and ("%#dipherStagedSign#" .. STAGED_GLYPH .. "%*") or " ") .. s
+    end
+    return s
 end
 
 return M
