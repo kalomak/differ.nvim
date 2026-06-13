@@ -46,6 +46,16 @@ local STATUS_HL = {
 ---@field title string|nil
 ---@field entries dipher.FileEntry[]
 
+-- file-level staging hooks (§8.6 slice C); supplied by the local frontend for the
+-- working-tree source, nil otherwise (rev-pair lists aren't stageable)
+---@class dipher.panel.Actions
+---@field stage fun(entry: dipher.FileEntry)
+---@field unstage fun(entry: dipher.FileEntry)
+---@field stage_all fun()
+---@field unstage_all fun()
+---@field discard fun(entry: dipher.FileEntry)
+---@field reload fun(): dipher.panel.Section[] -- recompute sections after an op
+
 ---@class dipher.Panel
 ---@field bufnr integer
 ---@field winid integer|nil
@@ -57,6 +67,7 @@ local STATUS_HL = {
 ---@field on_close fun()|nil
 ---@field root string|nil
 ---@field footer string|nil
+---@field actions dipher.panel.Actions|nil
 ---@field quarter_scroll boolean
 ---@field icon_for nil|fun(path: string): string|nil, string|nil
 ---@field position string
@@ -73,6 +84,7 @@ Panel.__index = Panel
 ---@field on_close? fun()  -- runs on :close (e.g. tear down the driven view)
 ---@field root? string  -- repo/worktree path shown in the panel header
 ---@field footer? string -- rev spec shown under "Showing changes for:"
+---@field actions? dipher.panel.Actions -- file-level staging hooks (§8.6 slice C)
 ---@field quarter_scroll? boolean -- f/b quarter-page scroll in the panel (default true)
 ---@field icons? boolean -- filetype devicons (default true when available)
 ---@field listing? "tree"|"flat"
@@ -105,6 +117,7 @@ function Panel.new(opts)
         on_close = opts.on_close,
         root = opts.root,
         footer = opts.footer,
+        actions = opts.actions,
         quarter_scroll = opts.quarter_scroll ~= false,
         icon_for = opts.icons ~= false and devicon_provider() or nil,
         listing = opts.listing or "tree",
@@ -300,6 +313,58 @@ function Panel:select()
     end
 end
 
+-- the FileEntry under the cursor, or nil if the cursor isn't on a file row
+---@return dipher.FileEntry|nil
+function Panel:_cursor_entry()
+    local m = self.winid and self.meta[vim.api.nvim_win_get_cursor(self.winid)[1]]
+    return m and m.kind == "file" and m.entry or nil
+end
+
+-- re-read the model (after a stage op or on focus) and repaint, keeping the cursor
+-- line (clamped). no-op without staging actions (rev-pair panels aren't reloadable)
+function Panel:refresh()
+    if not self.actions then
+        return
+    end
+    local lnum = self.winid and vim.api.nvim_win_get_cursor(self.winid)[1] or 1
+    self:set_sections(self.actions.reload())
+    self:_restore_cursor(lnum)
+end
+
+-- s/u/S/U: stage or unstage the file under the cursor (or all), then refresh
+---@param op "stage"|"unstage"|"stage_all"|"unstage_all"
+function Panel:stage_op(op)
+    if not self.actions then
+        return
+    end
+    if op == "stage_all" or op == "unstage_all" then
+        self.actions[op]()
+    else
+        local entry = self:_cursor_entry()
+        if not entry then
+            return
+        end
+        self.actions[op](entry)
+    end
+    self:refresh()
+end
+
+-- X: discard the file under the cursor after a confirm (destructive), then refresh
+function Panel:discard()
+    if not self.actions then
+        return
+    end
+    local entry = self:_cursor_entry()
+    if not entry then
+        return
+    end
+    local choice = vim.fn.confirm(("Discard changes to %s?"):format(entry.path), "&Yes\n&No", 2)
+    if choice == 1 then
+        self.actions.discard(entry)
+        self:refresh()
+    end
+end
+
 -- ]f / [f: move to the next/prev file row and open it (lockstep file stepping).
 -- `keep_focus` is threaded to `_open` so in-view stepping stays in the diff window
 ---@param direction "next"|"prev"
@@ -344,8 +409,16 @@ function Panel:show_help()
         " <CR> / o   open file / toggle fold",
         " ]f / [f    next / previous file",
         " f / b      scroll diff down / up",
-        " g?         this help",
     }
+    if self.actions then
+        vim.list_extend(lines, {
+            " s / u      stage / unstage file",
+            " S / U      stage / unstage all",
+            " X          discard file (confirm)",
+            " R          refresh",
+        })
+    end
+    vim.list_extend(lines, { " g?         this help" })
     local width = 0
     for _, l in ipairs(lines) do
         width = math.max(width, #l)
@@ -419,6 +492,26 @@ function Panel:_setup_window()
         map("b", function()
             self:scroll("up")
         end, "scroll up a quarter page")
+    end
+    if self.actions then
+        map("s", function()
+            self:stage_op("stage")
+        end, "stage file")
+        map("u", function()
+            self:stage_op("unstage")
+        end, "unstage file")
+        map("S", function()
+            self:stage_op("stage_all")
+        end, "stage all")
+        map("U", function()
+            self:stage_op("unstage_all")
+        end, "unstage all")
+        map("X", function()
+            self:discard()
+        end, "discard file")
+        map("R", function()
+            self:refresh()
+        end, "refresh")
     end
 end
 

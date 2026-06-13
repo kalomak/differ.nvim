@@ -214,6 +214,143 @@ describe(":Dipher panel", function()
     end)
 end)
 
+describe(":Dipher panel staging (§8.6 slice C)", function()
+    local Panel = require("dipher.panel")
+
+    -- the FileEntry for `path`, optionally pinned to staged/unstaged, via the panel
+    -- meta (which is rebuilt by refresh after each op)
+    local function entry_of(p, path, staged)
+        for _, m in ipairs(p.meta) do
+            if
+                m.kind == "file"
+                and m.entry.path == path
+                and (staged == nil or m.entry.staged == staged)
+            then
+                return m.entry
+            end
+        end
+    end
+    local function file_line(p, path, staged)
+        for i, m in ipairs(p.meta) do
+            if
+                m.kind == "file"
+                and m.entry.path == path
+                and (staged == nil or m.entry.staged == staged)
+            then
+                return i
+            end
+        end
+    end
+    local function keymaps(p)
+        local lhs = {}
+        for _, m in ipairs(vim.api.nvim_buf_get_keymap(p.bufnr, "n")) do
+            lhs[m.lhs] = true
+        end
+        return lhs
+    end
+
+    it("stages and unstages the file under the cursor", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- unstaged modify
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({})
+        local p = Panel.current()
+        assert.is_not_nil(entry_of(p, "a.lua", false)) -- starts unstaged
+
+        vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "a.lua", false), 0 })
+        p:stage_op("stage")
+        assert.is_not_nil(entry_of(p, "a.lua", true)) -- now staged
+        assert.is_nil(entry_of(p, "a.lua", false))
+
+        vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "a.lua", true), 0 })
+        p:stage_op("unstage")
+        assert.is_not_nil(entry_of(p, "a.lua", false)) -- back to unstaged
+        p:close()
+    end)
+
+    it("stages and unstages all", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- modified
+        write(root .. "/b.lua", "new\n") -- untracked
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({})
+        local p = Panel.current()
+
+        p:stage_op("stage_all")
+        assert.is_not_nil(entry_of(p, "a.lua", true))
+        assert.is_not_nil(entry_of(p, "b.lua", true)) -- untracked got added too
+
+        p:stage_op("unstage_all")
+        assert.is_nil(entry_of(p, "a.lua", true))
+        p:close()
+    end)
+
+    it("discards a tracked file back to HEAD (after confirm)", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({})
+        local p = Panel.current()
+        vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "a.lua"), 0 })
+
+        local orig = vim.fn.confirm
+        vim.fn.confirm = function()
+            return 1
+        end
+        p:discard()
+        vim.fn.confirm = orig
+
+        assert.is_nil(entry_of(p, "a.lua")) -- no longer a change
+        assert.are.equal(V1, table.concat(vim.fn.readfile(root .. "/a.lua"), "\n") .. "\n")
+        p:close()
+    end)
+
+    it("discards an untracked file by deleting it", function()
+        local root = fresh_repo()
+        write(root .. "/u.lua", "untracked\n")
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({})
+        local p = Panel.current()
+        vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "u.lua"), 0 })
+
+        local orig = vim.fn.confirm
+        vim.fn.confirm = function()
+            return 1
+        end
+        p:discard()
+        vim.fn.confirm = orig
+
+        assert.are.equal(0, vim.fn.filereadable(root .. "/u.lua"))
+        p:close()
+    end)
+
+    it("binds staging keys for the worktree source", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({})
+        local p = Panel.current()
+        local lhs = keymaps(p)
+        for _, k in ipairs({ "s", "u", "S", "U", "X", "R" }) do
+            assert.is_true(lhs[k])
+        end
+        p:close()
+    end)
+
+    it("does not bind staging keys for a rev-pair source", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        git(root, "commit", "-q", "-am", "edit")
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.panel({ rev = "HEAD~1..HEAD" })
+        local p = Panel.current()
+        local lhs = keymaps(p)
+        assert.is_nil(lhs["s"])
+        assert.is_nil(lhs["X"])
+        p:close()
+    end)
+end)
+
 describe(":Dipher (open_first)", function()
     local Panel = require("dipher.panel")
 

@@ -256,6 +256,63 @@ function M.status_sections(root)
     }
 end
 
+-- file-level staging ops driven from the panel (§8.6 slice C); each is whole-file
+-- and operates on the repo root. hunk-level staging stays in the diff view (§8.1)
+
+---@param root string
+---@param path string
+function M.stage(root, path)
+    git({ "add", "--", path }, root)
+end
+
+---@param root string
+---@param path string
+function M.unstage(root, path)
+    git({ "reset", "-q", "HEAD", "--", path }, root)
+end
+
+---@param root string
+function M.stage_all(root)
+    git({ "add", "-A" }, root)
+end
+
+---@param root string
+function M.unstage_all(root)
+    git({ "reset", "-q", "HEAD" }, root)
+end
+
+-- discard a file's changes: untracked or a staged-add drops the file (unstaging
+-- first if needed); anything tracked in HEAD reverts index + worktree to HEAD.
+-- destructive, so the panel confirms before calling this
+---@param root string
+---@param entry dipher.FileEntry
+function M.discard(root, entry)
+    local abs = root .. "/" .. entry.path
+    if entry.status == "?" then
+        os.remove(abs)
+    elseif entry.status == "A" then
+        git({ "reset", "-q", "HEAD", "--", entry.path }, root) -- unstage the add
+        os.remove(abs)
+    else
+        git({ "checkout", "HEAD", "--", entry.path }, root) -- revert index + worktree
+    end
+end
+
+-- drop empty sections so the panel never shows a bare "Staged (0)" header; returns
+-- the kept sections and their total entry count
+---@param sections dipher.panel.Section[]
+---@return dipher.panel.Section[] nonempty, integer total
+local function nonempty_sections(sections)
+    local out, total = {}, 0
+    for _, sec in ipairs(sections) do
+        if #sec.entries > 0 then
+            out[#out + 1] = sec
+            total = total + #sec.entries
+        end
+    end
+    return out, total
+end
+
 -- the repo to operate on: the current file's repo if it's a real file, else cwd
 ---@return string|nil
 local function repo_root()
@@ -308,8 +365,9 @@ function M.panel(opts)
 
     -- model_for picks the (old, new) pair per entry: working-tree sections diff by
     -- the entry's staged flag (staged = HEAD↔index, else index↔worktree), while a
-    -- rev-pair list diffs every entry against the one resolved source
-    local sections, model_for
+    -- rev-pair list diffs every entry against the one resolved source. `actions`
+    -- (file-level staging) is only meaningful for the worktree-status source
+    local sections, model_for, actions
     if is_worktree_status(source) then
         sections = M.status_sections(root)
         model_for = function(entry)
@@ -317,6 +375,26 @@ function M.panel(opts)
                 or { old = INDEX, new = WORKTREE }
             return M.model(s, root, entry, branch)
         end
+        actions = {
+            stage = function(entry)
+                M.stage(root, entry.path)
+            end,
+            unstage = function(entry)
+                M.unstage(root, entry.path)
+            end,
+            stage_all = function()
+                M.stage_all(root)
+            end,
+            unstage_all = function()
+                M.unstage_all(root)
+            end,
+            discard = function(entry)
+                M.discard(root, entry)
+            end,
+            reload = function()
+                return (nonempty_sections(M.status_sections(root)))
+            end,
+        }
     else
         sections = { { title = "Changes", entries = M.file_entries(source, root) } }
         model_for = function(entry)
@@ -324,14 +402,7 @@ function M.panel(opts)
         end
     end
 
-    -- drop empty sections so the panel never shows a bare "Staged (0)" header
-    local nonempty, total = {}, 0
-    for _, sec in ipairs(sections) do
-        if #sec.entries > 0 then
-            nonempty[#nonempty + 1] = sec
-            total = total + #sec.entries
-        end
-    end
+    local nonempty, total = nonempty_sections(sections)
     if total == 0 then
         return notify("no changes for this source")
     end
@@ -341,6 +412,7 @@ function M.panel(opts)
         sections = nonempty,
         root = vim.fn.fnamemodify(root, ":~"), -- ~-relative repo path for the header
         footer = footer_label(args, root),
+        actions = actions,
         quarter_scroll = require("dipher").get_config().keymaps.quarter_scroll,
         listing = opts.listing,
         position = opts.position,
