@@ -15,12 +15,14 @@ import (
 // mockAPI records what it was called with so handler routing/validation can be
 // asserted without the github transport.
 type mockAPI struct {
-	prs       []github.PR
-	detail    *github.PRDetail
-	gotFilter string
-	gotNumber int
-	gotPath   string
-	called    bool
+	prs         []github.PR
+	detail      *github.PRDetail
+	gotFilter   string
+	gotNumber   int
+	gotPath     string
+	gotReviewID string
+	gotEvent    string
+	called      bool
 }
 
 func (m *mockAPI) ListPRs(_ context.Context, _, _, filter string) ([]github.PR, error) {
@@ -58,6 +60,25 @@ func (m *mockAPI) GetChecks(_ context.Context, _, _ string, number int) (*github
 	m.called = true
 	m.gotNumber = number
 	return &github.Checks{}, nil
+}
+
+func (m *mockAPI) StartReview(_ context.Context, _, _ string, number int) (*github.StartReview, error) {
+	m.called = true
+	m.gotNumber = number
+	return &github.StartReview{ReviewID: "PRR_1"}, nil
+}
+
+func (m *mockAPI) SubmitReview(_ context.Context, reviewID, event, _ string) (*github.SubmitReview, error) {
+	m.called = true
+	m.gotReviewID = reviewID
+	m.gotEvent = event
+	return &github.SubmitReview{ID: 99}, nil
+}
+
+func (m *mockAPI) DiscardReview(_ context.Context, reviewID string) error {
+	m.called = true
+	m.gotReviewID = reviewID
+	return nil
 }
 
 func deps(m *mockAPI) Deps {
@@ -173,5 +194,68 @@ func TestPRScopedReadMethods(t *testing.T) {
 				t.Error("GH must not be called without a number")
 			}
 		})
+	}
+}
+
+func TestStartReviewRoutes(t *testing.T) {
+	m := &mockAPI{}
+	res, err := deps(m).startReview(context.Background(), json.RawMessage(`{"owner":"o","repo":"r","number":3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.gotNumber != 3 || res.(*github.StartReview).ReviewID != "PRR_1" {
+		t.Errorf("start_review not forwarded: number=%d res=%+v", m.gotNumber, res)
+	}
+}
+
+func TestSubmitReviewRoutes(t *testing.T) {
+	m := &mockAPI{}
+	_, err := deps(m).submitReview(context.Background(), json.RawMessage(`{"owner":"o","repo":"r","number":3,"review_id":"PRR_1","event":"APPROVE","body":"lgtm"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.gotReviewID != "PRR_1" || m.gotEvent != "APPROVE" {
+		t.Errorf("submit_review not forwarded: id=%q event=%q", m.gotReviewID, m.gotEvent)
+	}
+}
+
+func TestSubmitReviewValidation(t *testing.T) {
+	cases := map[string]string{
+		"missing review_id": `{"owner":"o","repo":"r","number":3,"event":"APPROVE"}`,
+		"missing event":     `{"owner":"o","repo":"r","number":3,"review_id":"PRR_1"}`,
+		"bad event":         `{"owner":"o","repo":"r","number":3,"review_id":"PRR_1","event":"MERGE"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := &mockAPI{}
+			_, err := deps(m).submitReview(context.Background(), json.RawMessage(body))
+			wantBadRequest(t, err)
+			if m.called {
+				t.Error("GH must not be called on invalid input")
+			}
+		})
+	}
+}
+
+func TestDiscardReviewRoutes(t *testing.T) {
+	m := &mockAPI{}
+	res, err := deps(m).discardReview(context.Background(), json.RawMessage(`{"owner":"o","repo":"r","number":3,"review_id":"PRR_1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.gotReviewID != "PRR_1" {
+		t.Errorf("discard_review id not forwarded: %q", m.gotReviewID)
+	}
+	if b, _ := json.Marshal(res); string(b) != "{}" {
+		t.Errorf("discard_review should return {}, got %s", b)
+	}
+}
+
+func TestDiscardReviewRequiresReviewID(t *testing.T) {
+	m := &mockAPI{}
+	_, err := deps(m).discardReview(context.Background(), json.RawMessage(`{"owner":"o","repo":"r","number":3}`))
+	wantBadRequest(t, err)
+	if m.called {
+		t.Error("GH must not be called without a review_id")
 	}
 }

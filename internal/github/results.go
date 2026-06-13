@@ -112,3 +112,14 @@ type Check struct {
 	URL        string `json:"url"`
 	StartedAt  string `json:"started_at,omitempty"`
 }
+
+// StartReview is the start_review result: the pending review's node id (a fresh
+// one, or the viewer's existing draft when start_review is replayed).
+type StartReview struct {
+	ReviewID string `json:"review_id"`
+}
+
+// SubmitReview is the submit_review result: the finalized review's numeric id.
+type SubmitReview struct {
+	ID int64 `json:"id"`
+}

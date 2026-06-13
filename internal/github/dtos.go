@@ -175,3 +175,37 @@ type checkContextGQL struct {
 	TargetURL string `json:"targetUrl"`
 	CreatedAt string `json:"createdAt"`
 }
+
+// startReviewLookupGQL carries the PR node id and the viewer's existing pending
+// review, the two facts start_review needs to stay idempotent.
+type startReviewLookupGQL struct {
+	Repository struct {
+		PullRequest struct {
+			ID      string `json:"id"`
+			Reviews struct {
+				Nodes []struct {
+					ID string `json:"id"`
+				} `json:"nodes"`
+			} `json:"reviews"`
+		} `json:"pullRequest"`
+	} `json:"repository"`
+}
+
+// addReviewGQL is the addPullRequestReview response; ID is the new review node id.
+type addReviewGQL struct {
+	AddPullRequestReview struct {
+		PullRequestReview struct {
+			ID string `json:"id"`
+		} `json:"pullRequestReview"`
+	} `json:"addPullRequestReview"`
+}
+
+// submitReviewGQL is the submitPullRequestReview response; the submitted review's
+// numeric id (BigInt as a string).
+type submitReviewGQL struct {
+	SubmitPullRequestReview struct {
+		PullRequestReview struct {
+			FullDatabaseID string `json:"fullDatabaseId"`
+		} `json:"pullRequestReview"`
+	} `json:"submitPullRequestReview"`
+}
