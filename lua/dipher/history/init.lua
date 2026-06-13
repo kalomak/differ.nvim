@@ -8,6 +8,7 @@
 
 local set_wo = require("dipher.util.win").set_local
 local date_util = require("dipher.util.date")
+local bind = require("dipher.util.keymap").bind
 
 local ns = vim.api.nvim_create_namespace("dipher.history")
 local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
@@ -51,7 +52,7 @@ local current = nil
 ---@field on_file fun(commit: dipher.git.Commit, entry: dipher.FileEntry)|nil -- range mode
 ---@field on_close fun()|nil
 ---@field path string              -- file path (file mode) or range (range mode), for the header
----@field quarter_scroll boolean
+---@field keymaps table<string, string|string[]|false>
 ---@field relative_dates boolean
 ---@field position string
 ---@field lines string[]
@@ -67,7 +68,7 @@ History.__index = History
 ---@field on_file? fun(commit: dipher.git.Commit, entry: dipher.FileEntry)
 ---@field on_close? fun()
 ---@field path string
----@field quarter_scroll? boolean
+---@field keymaps? table<string, string|string[]|false> -- resolved history action -> lhs (§4.3)
 ---@field relative_dates? boolean
 ---@field position? "bottom"|"top"|"left"|"right"
 
@@ -98,7 +99,11 @@ function History.new(opts)
         on_file = opts.on_file,
         on_close = opts.on_close,
         path = opts.path,
-        quarter_scroll = opts.quarter_scroll ~= false,
+        keymaps = vim.tbl_extend(
+            "force",
+            require("dipher.config").defaults.keymaps,
+            opts.keymaps or {}
+        ),
         relative_dates = opts.relative_dates or false,
         position = opts.position or "bottom",
         lines = {},
@@ -473,8 +478,8 @@ function History:step(direction, keep_focus)
     end
 end
 
--- f / b: scroll the *diff view* a quarter page (named `scroll`, not `quarter_scroll`,
--- to avoid shadowing the boolean field, as in the file panel)
+-- scroll the *diff view* a quarter page (the origin window), not the panel list,
+-- mirroring the file panel (default f / b)
 ---@param direction "down"|"up"
 function History:scroll(direction)
     local win = self.origin_win
@@ -550,49 +555,40 @@ function History:_setup_window()
         set_wo(win, "winfixheight", true)
     end
 
-    local function map(lhs, fn, desc)
-        vim.keymap.set(
-            "n",
-            lhs,
-            fn,
-            { buffer = self.bufnr, desc = "dipher history: " .. desc, nowait = true }
-        )
+    local km = self.keymaps
+    local function map(spec, fn, desc)
+        bind(self.bufnr, spec, fn, "dipher history: " .. desc)
     end
     local item = self.mode == "range" and "file" or "commit"
-    map("<CR>", function()
+    map(km.select, function()
         self:select()
     end, "open " .. item)
-    map("o", function()
-        self:select()
-    end, "open " .. item)
-    map("]f", function()
+    map(km.next_file, function()
         self:step("next")
     end, "next " .. item)
-    map("[f", function()
+    map(km.prev_file, function()
         self:step("prev")
     end, "previous " .. item)
     if self.mode == "range" then
-        map("za", function()
+        map(km.toggle_fold, function()
             self:toggle_fold()
         end, "toggle fold")
     end
-    map("]c", function()
+    map(km.next_hunk, function()
         require("dipher").goto_hunk("next")
     end, "next hunk")
-    map("[c", function()
+    map(km.prev_hunk, function()
         require("dipher").goto_hunk("prev")
     end, "previous hunk")
-    map("g?", function()
+    map(km.help, function()
         self:show_help()
     end, "help")
-    if self.quarter_scroll then
-        map("f", function()
-            self:scroll("down")
-        end, "scroll down a quarter page")
-        map("b", function()
-            self:scroll("up")
-        end, "scroll up a quarter page")
-    end
+    map(km.scroll_down, function()
+        self:scroll("down")
+    end, "scroll down a quarter page")
+    map(km.scroll_up, function()
+        self:scroll("up")
+    end, "scroll up a quarter page")
 end
 
 -- create the split in the configured position, bind the buffer, set window opts

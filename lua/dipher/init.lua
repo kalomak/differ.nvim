@@ -44,7 +44,7 @@ function M.diff_model(model, opts)
             layout = opts.layout or cfg.layout,
             context = opts.context or cfg.context,
             deep_diff = cfg.deep_diff,
-            keymaps = cfg.keymaps,
+            keymaps = cfg.keymaps.diff,
             staging = opts.staging,
             can_stage = opts.can_stage,
         })

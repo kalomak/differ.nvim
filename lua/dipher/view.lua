@@ -9,6 +9,7 @@ local paint = require("dipher.ui.paint")
 local syntax = require("dipher.syntax")
 local statuscolumn = require("dipher.ui.statuscolumn")
 local nav = require("dipher.nav")
+local bind = require("dipher.util.keymap").bind
 
 local ns = vim.api.nvim_create_namespace("dipher")
 local staged_ns = vim.api.nvim_create_namespace("dipher.staging")
@@ -90,7 +91,13 @@ function View.new(model, opts)
         layout = opts.layout,
         context = opts.context,
         deep_diff = opts.deep_diff,
-        keymaps = opts.keymaps or {},
+        -- the diff surface's resolved action -> lhs map; default to the shared
+        -- defaults so a directly-constructed View still binds (merge keeps partials)
+        keymaps = vim.tbl_extend(
+            "force",
+            require("dipher.config").defaults.keymaps,
+            opts.keymaps or {}
+        ),
         can_stage = opts.can_stage or false,
         staging = opts.staging,
         staged_hunks = {},
@@ -371,52 +378,51 @@ function View:_setup_window(winid, bufnr)
     set_wo(winid, "wrap", false)
     set_wo(winid, "scrollbind", false) -- cleared default; split re-enables it in :open
     set_wo(winid, "statuscolumn", STATUSCOLUMN_EXPR)
-    vim.keymap.set("n", "]c", function()
+    local km = self.keymaps
+    bind(bufnr, km.next_hunk, function()
         self:goto_hunk("next")
-    end, { buffer = bufnr, desc = "dipher: next hunk" })
-    vim.keymap.set("n", "[c", function()
+    end, "dipher: next hunk")
+    bind(bufnr, km.prev_hunk, function()
         self:goto_hunk("prev")
-    end, { buffer = bufnr, desc = "dipher: previous hunk" })
-    vim.keymap.set("n", "d=", function()
+    end, "dipher: previous hunk")
+    bind(bufnr, km.more_context, function()
         self:adjust_context(1)
-    end, { buffer = bufnr, desc = "dipher: more context" })
-    vim.keymap.set("n", "d-", function()
+    end, "dipher: more context")
+    bind(bufnr, km.less_context, function()
         self:adjust_context(-1)
-    end, { buffer = bufnr, desc = "dipher: less context" })
-    -- ]f / [f drive the file panel's selection in lockstep, keeping focus here in
-    -- the diff window (no-op when no panel is open)
-    vim.keymap.set("n", "]f", function()
+    end, "dipher: less context")
+    -- next/prev file drive the file panel's (or history's) selection in lockstep,
+    -- keeping focus here in the diff window (no-op when neither is open)
+    bind(bufnr, km.next_file, function()
         self:step_file("next")
-    end, { buffer = bufnr, desc = "dipher: next file" })
-    vim.keymap.set("n", "[f", function()
+    end, "dipher: next file")
+    bind(bufnr, km.prev_file, function()
         self:step_file("prev")
-    end, { buffer = bufnr, desc = "dipher: previous file" })
-    -- f / b quarter-page scroll (opt-out: shadows native find-char / back-word)
-    if self.keymaps.quarter_scroll ~= false then
-        vim.keymap.set("n", "f", function()
-            self:quarter_scroll("down")
-        end, { buffer = bufnr, desc = "dipher: scroll down a quarter page" })
-        vim.keymap.set("n", "b", function()
-            self:quarter_scroll("up")
-        end, { buffer = bufnr, desc = "dipher: scroll up a quarter page" })
-    end
-    -- s / u stage / unstage the hunk under the cursor (§8.1), hunk-level here vs
-    -- file-level in the panel. bound for the whole worktree-status session; the
-    -- per-file direction is checked at call time (the buffer is read-only, so
-    -- shadowing native substitute / undo is harmless)
+    end, "dipher: previous file")
+    -- scroll defaults to f/b, which shadow native find-char / back-word (set false)
+    bind(bufnr, km.scroll_down, function()
+        self:quarter_scroll("down")
+    end, "dipher: scroll down a quarter page")
+    bind(bufnr, km.scroll_up, function()
+        self:quarter_scroll("up")
+    end, "dipher: scroll up a quarter page")
+    -- stage / unstage the hunk under the cursor (§8.1), hunk-level here vs file-level
+    -- in the panel. bound for the whole worktree-status session; the per-file
+    -- direction is checked at call time (the buffer is read-only, so shadowing native
+    -- substitute / undo is harmless)
     if self.can_stage then
-        vim.keymap.set("n", "s", function()
+        bind(bufnr, km.stage, function()
             self:stage_hunk()
-        end, { buffer = bufnr, desc = "dipher: stage hunk" })
-        vim.keymap.set("n", "u", function()
+        end, "dipher: stage hunk")
+        bind(bufnr, km.unstage, function()
             self:unstage_hunk()
-        end, { buffer = bufnr, desc = "dipher: unstage hunk" })
-        vim.keymap.set("n", "S", function()
+        end, "dipher: unstage hunk")
+        bind(bufnr, km.stage_all, function()
             self:stage_all()
-        end, { buffer = bufnr, desc = "dipher: stage all hunks" })
-        vim.keymap.set("n", "U", function()
+        end, "dipher: stage all hunks")
+        bind(bufnr, km.unstage_all, function()
             self:unstage_all()
-        end, { buffer = bufnr, desc = "dipher: unstage all hunks" })
+        end, "dipher: unstage all hunks")
     end
 end
 

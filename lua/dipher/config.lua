@@ -5,11 +5,16 @@
 ---@field context integer
 ---@field deep_diff { enabled: boolean, granularity: "word"|"char", similarity_threshold: number }
 ---@field comments { inline: boolean, collapsed: boolean }
----@field keymaps { quarter_scroll: boolean }
+---@field keymaps table<string, string|string[]|false|table>
 ---@field relative_dates boolean
 ---@field sidecar_bin string|nil
 
 local M = {}
+
+-- the surfaces that bind buffer-local maps; each takes the shared defaults plus its
+-- own `keymaps.<surface>` override subtable
+local SURFACES = { "diff", "panel", "history" }
+local SURFACE_SET = { diff = true, panel = true, history = true }
 
 ---@type dipher.Config
 M.defaults = {
@@ -24,11 +29,28 @@ M.defaults = {
         inline = true,
         collapsed = false,
     },
+    -- buffer-local maps, one flat table of action -> lhs shared across the diff,
+    -- panel and history surfaces (each binds the actions it implements). a value is
+    -- a string, a list of strings (multiple binds), or false to disable. override
+    -- globally here, or scope to one surface via a `diff`/`panel`/`history` subtable
     keymaps = {
-        -- f/b quarter-page scroll in diff windows
-        -- on by default (the intended feel)
-        -- set to false to get native motions back
-        quarter_scroll = true,
+        next_hunk = "]c", -- diff, panel, history
+        prev_hunk = "[c",
+        next_file = "]f", -- diff; panel/history step the selection
+        prev_file = "[f",
+        scroll_down = "f", -- all three (shadows native f/b; set false to restore)
+        scroll_up = "b",
+        select = { "<CR>", "o" }, -- panel, history
+        help = "g?", -- panel, history
+        stage = "s", -- diff (hunk-level), panel (file-level)
+        unstage = "u",
+        stage_all = "S",
+        unstage_all = "U",
+        more_context = "d=", -- diff
+        less_context = "d-",
+        discard = "X", -- panel
+        refresh = "R",
+        toggle_fold = "za", -- history (range mode)
     },
     -- show dates as relative ("3 days ago") instead of YYYY-MM-DD wherever the
     -- plugin renders one (the history panel today, more surfaces later)
@@ -36,11 +58,51 @@ M.defaults = {
     sidecar_bin = nil,
 }
 
--- merge user opts over defaults and return the resolved config
+-- resolve the keymaps config into per-surface action tables. the shared (top-level)
+-- defaults take any top-level user override, then each surface layers its own
+-- `keymaps.<surface>` subtable on top. merges are shallow per action so a user list
+-- or `false` replaces the default wholesale (tbl_deep_extend would index-merge lists)
+-- pure (no vim) so it stays unit-testable under busted, like the other parsers
+---@param user_km table|nil
+---@return table<string, table<string, string|string[]|false>>
+function M.resolve_keymaps(user_km)
+    user_km = user_km or {}
+    local shared = {}
+    for action, lhs in pairs(M.defaults.keymaps) do
+        shared[action] = lhs
+    end
+    for action, lhs in pairs(user_km) do
+        if not SURFACE_SET[action] then
+            shared[action] = lhs -- top-level override reaches every surface
+        end
+    end
+    local out = {}
+    for _, surface in ipairs(SURFACES) do
+        local resolved = {}
+        for action, lhs in pairs(shared) do
+            resolved[action] = lhs
+        end
+        local override = user_km[surface]
+        if type(override) == "table" then
+            for action, lhs in pairs(override) do
+                resolved[action] = lhs -- per-surface override wins
+            end
+        end
+        out[surface] = resolved
+    end
+    return out
+end
+
+-- merge user opts over defaults and return the resolved config. keymaps are resolved
+-- into per-surface tables separately (a plain deep-extend would index-merge the
+-- multi-lhs lists)
 ---@param user table|nil
 ---@return dipher.Config
 function M.resolve(user)
-    return vim.tbl_deep_extend("force", M.defaults, user or {})
+    user = user or {}
+    local cfg = vim.tbl_deep_extend("force", M.defaults, user)
+    cfg.keymaps = M.resolve_keymaps(user.keymaps)
+    return cfg
 end
 
 return M

@@ -135,8 +135,19 @@ require("dipher").setup({
     inline = true,
     collapsed = false,
   },
-  keymaps = {
-    quarter_scroll = true,       -- f/b quarter-page scroll in diff windows (opt-out)
+  keymaps = {                    -- one flat action -> lhs table, shared across the diff,
+    next_hunk = "]c",            -- panel and history surfaces (each binds what it has).
+    prev_hunk = "[c",            -- a value is a string, a list, or false to disable.
+    next_file = "]f",            -- override globally here, or scope to one surface via
+    prev_file = "[f",            -- a diff = {...} / panel = {...} / history = {...} subtable
+    scroll_down = "f",           -- f/b scroll the diff a quarter page (shadow native f/b)
+    scroll_up = "b",
+    select = { "<CR>", "o" },    -- panel + history
+    help = "g?",                 -- panel + history
+    stage = "s", unstage = "u", stage_all = "S", unstage_all = "U",  -- diff (hunk) + panel (file)
+    more_context = "d=", less_context = "d-",                        -- diff
+    discard = "X", refresh = "R",                                    -- panel
+    toggle_fold = "za",                                              -- history (range mode)
   },
   relative_dates = false,        -- "3 days ago" instead of YYYY-MM-DD wherever a date shows
   sidecar_bin = nil,             -- override the Go sidecar path (later phase)

@@ -181,7 +181,7 @@ end
 -- `head` (the current branch) rides along for the synthetic buffer's statusline
 ---@param source dipher.git.Source -- resolved (no merge_base refs)
 ---@param root string
----@param file dipher.git.ChangedFile|dipher.FileEntry
+---@param file { path: string, previous_path?: string } -- only the path(s) are read
 ---@param head string|nil
 ---@return dipher.DiffModel
 function M.model(source, root, file, head)
@@ -434,7 +434,15 @@ function M.panel(opts)
     if not root then
         return notify("not inside a git repository", vim.log.levels.WARN)
     end
-    local args = type(opts.rev) == "table" and opts.rev or (opts.rev and { opts.rev }) or {}
+    -- normalise the rev spec to an arg list (explicit branches so the type narrows)
+    local args ---@type string[]
+    if type(opts.rev) == "table" then
+        args = opts.rev
+    elseif opts.rev then
+        args = { opts.rev }
+    else
+        args = {}
+    end
     local source = M.resolve(rev.source(args), root)
     if not source then
         return
@@ -526,7 +534,7 @@ function M.panel(opts)
         root = vim.fn.fnamemodify(root, ":~"), -- ~-relative repo path for the header
         footer = footer_label(args, root),
         actions = actions,
-        quarter_scroll = require("dipher").get_config().keymaps.quarter_scroll,
+        keymaps = require("dipher").get_config().keymaps.panel,
         listing = opts.listing,
         position = opts.position,
         height = opts.height,
@@ -610,7 +618,7 @@ function M.history(opts)
     return History.new({
         commits = commits,
         path = vim.fn.fnamemodify(file, ":~"),
-        quarter_scroll = cfg.keymaps.quarter_scroll,
+        keymaps = cfg.keymaps.history,
         relative_dates = cfg.relative_dates,
         position = opts.position,
         on_select = function(commit)
@@ -665,7 +673,7 @@ function M.range_history(opts)
         commits = commits,
         mode = "range",
         path = range, -- the header shows the range in place of a file path
-        quarter_scroll = cfg.keymaps.quarter_scroll,
+        keymaps = cfg.keymaps.history,
         relative_dates = cfg.relative_dates,
         position = opts.position,
         expand = function(commit)

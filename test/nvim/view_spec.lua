@@ -179,18 +179,32 @@ describe("view in-view keymaps", function()
         v:close()
     end)
 
-    it("omits f/b when quarter_scroll is disabled, keeping ]f/[f", function()
+    it("omits f/b when scroll is disabled, keeping ]f/[f", function()
         local v = View.new(model("a\nb\n", "a\nB\n"), {
             layout = "stacked",
             context = math.huge,
             deep_diff = { enabled = true },
-            keymaps = { quarter_scroll = false },
+            keymaps = { scroll_down = false, scroll_up = false },
         })
         v:open()
         local lhs = maps(v)
         assert.is_true(lhs["]f"])
         assert.is_nil(lhs["f"])
         assert.is_nil(lhs["b"])
+        v:close()
+    end)
+
+    it("remaps an action to a custom lhs, dropping the default", function()
+        local v = View.new(model("a\nb\n", "a\nB\n"), {
+            layout = "stacked",
+            context = math.huge,
+            deep_diff = { enabled = true },
+            keymaps = require("dipher.config").resolve_keymaps({ next_hunk = "gh" }).diff,
+        })
+        v:open()
+        local lhs = maps(v)
+        assert.is_true(lhs["gh"]) -- the custom lhs is bound
+        assert.is_nil(lhs["]c"]) -- the default is gone
         v:close()
     end)
 end)

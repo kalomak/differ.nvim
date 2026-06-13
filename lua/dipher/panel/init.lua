@@ -9,6 +9,7 @@
 local tree = require("dipher.panel.tree")
 local render = require("dipher.panel.render")
 local set_wo = require("dipher.util.win").set_local
+local bind = require("dipher.util.keymap").bind
 
 local ns = vim.api.nvim_create_namespace("dipher.panel")
 local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
@@ -69,7 +70,7 @@ local STATUS_HL = {
 ---@field root string|nil
 ---@field footer string|nil
 ---@field actions dipher.panel.Actions|nil
----@field quarter_scroll boolean
+---@field keymaps table<string, string|string[]|false>
 ---@field icon_for nil|fun(path: string): string|nil, string|nil
 ---@field position string
 ---@field height integer
@@ -86,7 +87,7 @@ Panel.__index = Panel
 ---@field root? string  -- repo/worktree path shown in the panel header
 ---@field footer? string -- rev spec shown under "Showing changes for:"
 ---@field actions? dipher.panel.Actions -- file-level staging hooks (§8.6 slice C)
----@field quarter_scroll? boolean -- f/b quarter-page scroll in the panel (default true)
+---@field keymaps? table<string, string|string[]|false> -- resolved panel action -> lhs (§4.3)
 ---@field icons? boolean -- filetype devicons (default true when available)
 ---@field listing? "tree"|"flat"
 ---@field position? "bottom"|"top"|"left"|"right"
@@ -119,7 +120,11 @@ function Panel.new(opts)
         root = opts.root,
         footer = opts.footer,
         actions = opts.actions,
-        quarter_scroll = opts.quarter_scroll ~= false,
+        keymaps = vim.tbl_extend(
+            "force",
+            require("dipher.config").defaults.keymaps,
+            opts.keymaps or {}
+        ),
         icon_for = opts.icons ~= false and devicon_provider() or nil,
         listing = opts.listing or "tree",
         position = opts.position or "bottom",
@@ -388,10 +393,8 @@ function Panel:goto_file(direction, keep_focus)
     end
 end
 
--- f / b: scroll the *diff view* a quarter page (the origin window, where the file
--- renders), not the panel list, mirroring diffview's file-panel scroll. named
--- `scroll` (not `quarter_scroll`) to avoid shadowing the boolean field, which would
--- break the method lookup
+-- scroll the *diff view* a quarter page (the origin window, where the file renders),
+-- not the panel list, mirroring diffview's file-panel scroll (default f / b)
 ---@param direction "down"|"up"
 function Panel:scroll(direction)
     local win = self.origin_win
@@ -468,62 +471,53 @@ function Panel:_setup_window()
         set_wo(win, "winfixheight", true)
     end
 
-    local function map(lhs, fn, desc)
-        vim.keymap.set(
-            "n",
-            lhs,
-            fn,
-            { buffer = self.bufnr, desc = "dipher panel: " .. desc, nowait = true }
-        )
+    local km = self.keymaps
+    local function map(spec, fn, desc)
+        bind(self.bufnr, spec, fn, "dipher panel: " .. desc)
     end
-    map("<CR>", function()
+    map(km.select, function()
         self:select()
     end, "open / toggle fold")
-    map("o", function()
-        self:select()
-    end, "open / toggle fold")
-    map("]f", function()
+    map(km.next_file, function()
         self:goto_file("next")
     end, "next file")
-    map("[f", function()
+    map(km.prev_file, function()
         self:goto_file("prev")
     end, "previous file")
-    -- ]c / [c drive the diff view's hunk nav from the panel (bound buffer-locally
-    -- in the diff window too), so hunk stepping works from either side
-    map("]c", function()
+    -- next/prev hunk drive the diff view's hunk nav from the panel (bound buffer-
+    -- locally in the diff window too), so hunk stepping works from either side
+    map(km.next_hunk, function()
         require("dipher").goto_hunk("next")
     end, "next hunk")
-    map("[c", function()
+    map(km.prev_hunk, function()
         require("dipher").goto_hunk("prev")
     end, "previous hunk")
-    map("g?", function()
+    map(km.help, function()
         self:show_help()
     end, "help")
-    if self.quarter_scroll then
-        map("f", function()
-            self:scroll("down")
-        end, "scroll down a quarter page")
-        map("b", function()
-            self:scroll("up")
-        end, "scroll up a quarter page")
-    end
+    map(km.scroll_down, function()
+        self:scroll("down")
+    end, "scroll down a quarter page")
+    map(km.scroll_up, function()
+        self:scroll("up")
+    end, "scroll up a quarter page")
     if self.actions then
-        map("s", function()
+        map(km.stage, function()
             self:stage_op("stage")
         end, "stage file")
-        map("u", function()
+        map(km.unstage, function()
             self:stage_op("unstage")
         end, "unstage file")
-        map("S", function()
+        map(km.stage_all, function()
             self:stage_op("stage_all")
         end, "stage all")
-        map("U", function()
+        map(km.unstage_all, function()
             self:stage_op("unstage_all")
         end, "unstage all")
-        map("X", function()
+        map(km.discard, function()
             self:discard()
         end, "discard file")
-        map("R", function()
+        map(km.refresh, function()
             self:refresh()
         end, "refresh")
     end

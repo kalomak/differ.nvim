@@ -349,6 +349,20 @@ describe(":Dipher panel staging (§8.6 slice C)", function()
         assert.is_nil(lhs["X"])
         p:close()
     end)
+
+    it("honours a disabled panel action from setup config (§4.3 keymaps)", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+        require("dipher").setup({ keymaps = { panel = { discard = false } } })
+        git_src.panel({})
+        local p = Panel.current()
+        local lhs = keymaps(p)
+        assert.is_nil(lhs["X"]) -- discard disabled
+        assert.is_true(lhs["s"]) -- other staging keys unaffected
+        p:close()
+        require("dipher").setup({}) -- restore defaults for the rest of the suite
+    end)
 end)
 
 describe(":Dipher diff hunk staging (§8.1)", function()
