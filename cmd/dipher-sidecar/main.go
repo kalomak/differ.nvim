@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/seanhalberthal/dipher.nvim/internal/github"
 	"github.com/seanhalberthal/dipher.nvim/internal/handlers"
 	"github.com/seanhalberthal/dipher.nvim/internal/logx"
 	"github.com/seanhalberthal/dipher.nvim/internal/server"
@@ -20,7 +21,16 @@ func main() {
 	defer stop()
 
 	log := logx.New(slog.LevelInfo)
-	reg := handlers.NewRegistry(handlers.Deps{Log: log})
+
+	// token resolution failure is non-fatal: the handshake still works and the
+	// error is handed to the client so only PR methods surface gh_missing/auth.
+	token, tokenErr := github.ResolveToken()
+	if tokenErr != nil {
+		log.Warn("github auth not ready", "err", tokenErr)
+	}
+	gh := github.New(nil, token, tokenErr)
+
+	reg := handlers.NewRegistry(handlers.Deps{GH: gh, Log: log})
 	srv := server.New(reg, log)
 
 	if err := srv.Run(ctx, os.Stdin, os.Stdout); err != nil {

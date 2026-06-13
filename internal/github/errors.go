@@ -1,0 +1,111 @@
+package github
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+)
+
+// the github package is the single producer of mapped I/O codes (auth, not_found,
+// rate_limited, network). everything funnels through mapHTTP / mapGraphQL so the
+// closed set (§7.1) is enforced in one place.
+
+// restErrorBody is GitHub's REST error envelope; its message is safe to surface
+// (it never contains the token, which lives only in request headers).
+type restErrorBody struct {
+	Message string `json:"message"`
+}
+
+// mapHTTP turns a REST response (or a transport error) into a protocol.Error, or
+// nil when the status is 2xx. body is the already-read response body for messages.
+func mapHTTP(resp *http.Response, body []byte, transportErr error) *protocol.Error {
+	if transportErr != nil {
+		return protocol.NewError(protocol.CodeNetwork, "network error: "+transportErr.Error())
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+
+	msg := githubMessage(body, resp.Status)
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return protocol.NewError(protocol.CodeAuth, msg)
+	case http.StatusForbidden:
+		if ra, ok := rateLimited(resp); ok {
+			return protocol.RateLimited(msg, ra)
+		}
+		return protocol.NewError(protocol.CodeAuth, msg)
+	case http.StatusTooManyRequests:
+		ra, _ := rateLimited(resp)
+		return protocol.RateLimited(msg, ra)
+	case http.StatusNotFound:
+		return protocol.NewError(protocol.CodeNotFound, msg)
+	case http.StatusConflict:
+		return protocol.NewError(protocol.CodeConflict, msg)
+	case http.StatusUnprocessableEntity:
+		return protocol.NewError(protocol.CodeBadRequest, msg)
+	default:
+		// 5xx and any other unexpected status: internal, real status in the message.
+		return protocol.NewError(protocol.CodeInternal, msg)
+	}
+}
+
+// rateLimited reports whether a 403/429 is a rate-limit (not a permissions denial)
+// and the retry-after hint in seconds.
+func rateLimited(resp *http.Response) (int, bool) {
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n, true
+		}
+	}
+	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		if reset := resp.Header.Get("X-RateLimit-Reset"); reset != "" {
+			if epoch, err := strconv.ParseInt(reset, 10, 64); err == nil {
+				if secs := int(epoch - time.Now().Unix()); secs > 0 {
+					return secs, true
+				}
+			}
+		}
+		return 0, true
+	}
+	return 0, false
+}
+
+func githubMessage(body []byte, fallback string) string {
+	var b restErrorBody
+	if err := json.Unmarshal(body, &b); err == nil && b.Message != "" {
+		return b.Message
+	}
+	return fallback
+}
+
+// gqlError is one entry in a GraphQL {data, errors} response.
+type gqlError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// mapGraphQL turns GraphQL top-level errors into a protocol.Error (nil if none).
+// a 200 can still carry errors, so this runs even on HTTP success.
+func mapGraphQL(errs []gqlError) *protocol.Error {
+	if len(errs) == 0 {
+		return nil
+	}
+	msg := errs[0].Message
+	if msg == "" {
+		msg = "graphql error"
+	}
+	switch errs[0].Type {
+	case "NOT_FOUND":
+		return protocol.NewError(protocol.CodeNotFound, msg)
+	case "FORBIDDEN", "INSUFFICIENT_SCOPES":
+		return protocol.NewError(protocol.CodeAuth, msg)
+	case "RATE_LIMITED":
+		return protocol.RateLimited(msg, 0)
+	default:
+		return protocol.NewError(protocol.CodeInternal, msg)
+	}
+}

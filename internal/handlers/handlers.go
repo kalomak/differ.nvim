@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/seanhalberthal/dipher.nvim/internal/github"
 	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
 )
 
@@ -21,7 +22,10 @@ type Registry map[string]Handler
 // API is the github surface the handlers depend on, declared here (consumer-side)
 // so handler logic is mockable independently of the transport. *github.Client
 // satisfies it. grown per slice as methods land.
-type API interface{}
+type API interface {
+	ListPRs(ctx context.Context, owner, repo, filter string) ([]github.PR, error)
+	GetPR(ctx context.Context, owner, repo string, number int) (*github.PRDetail, error)
+}
 
 // Deps are the handler dependencies, injected once at construction (no globals).
 type Deps struct {
@@ -32,7 +36,9 @@ type Deps struct {
 // NewRegistry wires every method to its handler.
 func NewRegistry(d Deps) Registry {
 	return Registry{
-		"hello": d.hello,
+		"hello":    d.hello,
+		"list_prs": d.listPRs,
+		"get_pr":   d.getPR,
 	}
 }
 

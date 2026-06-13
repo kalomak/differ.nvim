@@ -1,0 +1,40 @@
+// Package github is the sidecar's I/O boundary: the only package that talks to
+// GitHub. it takes an injected *http.Client so tests swap a fake RoundTripper and
+// never hit the network (§10). all failures are mapped to the closed protocol code
+// set (errors.go); the token never leaves this package.
+package github
+
+import (
+	"net/http"
+	"sync"
+	"time"
+)
+
+const (
+	defaultREST = "https://api.github.com"
+	defaultGQL  = "https://api.github.com/graphql"
+	apiVersion  = "2022-11-28"
+)
+
+// Client talks to GitHub over REST and raw GraphQL.
+type Client struct {
+	http     *http.Client
+	token    string
+	tokenErr error // resolution failure (gh_missing/auth), surfaced on authed calls
+	restURL  string
+	gqlURL   string
+
+	mu     sync.Mutex
+	viewer string // memoised authenticated login, for list_prs filtering
+}
+
+// New builds a client. hc is injectable for tests; nil uses a sane default with a
+// timeout. token is the resolved GitHub token (see ResolveToken); tokenErr is the
+// resolution failure, if any, returned to the caller on the first authed request
+// so the precise gh_missing/auth code reaches the client instead of a bare 401.
+func New(hc *http.Client, token string, tokenErr error) *Client {
+	if hc == nil {
+		hc = &http.Client{Timeout: 30 * time.Second}
+	}
+	return &Client{http: hc, token: token, tokenErr: tokenErr, restURL: defaultREST, gqlURL: defaultGQL}
+}
