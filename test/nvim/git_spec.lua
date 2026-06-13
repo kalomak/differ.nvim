@@ -441,6 +441,34 @@ describe(":Dipher diff hunk staging (§8.1)", function()
         p:close()
     end)
 
+    it("stages an untracked file as one whole-file hunk instead of warning", function()
+        local root = fresh_repo()
+        write(root .. "/new.lua", "alpha\nbeta\n") -- untracked, the only change
+        vim.cmd.edit(root .. "/new.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.is_not_nil(v.staging) -- a new file now offers (whole-file) staging
+        assert.are.equal("unstaged", v.staging.initial)
+        assert.are.equal(1, #v.model.hunks) -- empty<->content is a single hunk
+
+        vim.api.nvim_win_set_cursor(p.origin_win, { 1, 0 })
+        v:stage_hunk()
+        assert.are.equal("alpha\nbeta\n", indexed(root, "new.lua")) -- whole file staged
+        assert.is_true(v.staged_hunks[1])
+
+        v:unstage_hunk() -- u back: leaves the index, untracked again
+        assert.is_false(v.staged_hunks[1])
+        local porc = vim.system(
+            { "git", "status", "--porcelain", "--", "new.lua" },
+            { cwd = root, text = true }
+        )
+            :wait().stdout
+        assert.are.equal("?? new.lua\n", porc)
+        p:close()
+    end)
+
     it("offsets later hunks by earlier staged ones (line-count shift)", function()
         local root = fresh_repo()
         write(root .. "/a.lua", "a\nb\nc\nd\n")

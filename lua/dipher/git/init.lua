@@ -496,37 +496,60 @@ function M.panel(opts)
     local view ---@type dipher.View|nil -- the single diff view the panel drives
     local panel ---@type dipher.Panel|nil -- forward ref so staging can refresh it
 
-    -- hunk-level staging (§8.1): only plain modifications (status "M", same path
-    -- both sides) stage by hunk; renames/adds/deletes stay file-level in the panel.
-    -- the view keeps its diff frozen and marks staged hunks in place, so it tracks
-    -- per-hunk state and asks `apply` to patch one hunk: forward stages, `reverse`
-    -- unstages, and `offset` shifts the patch past already-staged hunks before it.
-    -- `initial` is every hunk's starting state (an unstaged diff opens unstaged, a
-    -- staged one opens staged). the panel refreshes its counts after each op
+    -- hunk-level staging (§8.1): plain modifications (status "M", same path both
+    -- sides) stage by hunk; a new file (untracked "?" or staged add "A") diffs
+    -- empty<->content as one whole-file hunk, so it stages as a unit; renames/
+    -- copies/deletes stay file-level in the panel. the view keeps its diff frozen
+    -- and marks staged hunks in place, so it tracks per-hunk state and asks `apply`
+    -- to patch one hunk: forward stages, `reverse` unstages, and `offset` shifts the
+    -- patch past already-staged hunks before it. `initial` is every hunk's starting
+    -- state (an unstaged diff opens unstaged, a staged one opens staged). the panel
+    -- refreshes its counts after each op
     local stageable = is_worktree_status(source)
+    local function refresh_panel()
+        if panel then
+            panel:refresh()
+        end
+    end
     ---@param entry dipher.FileEntry
     ---@return dipher.view.Staging|nil
     local function stage_for(entry)
-        if not stageable or entry.status ~= "M" then
+        if not stageable then
             return nil
         end
-        return {
-            initial = entry.staged and "staged" or "unstaged",
-            apply = function(model, hunk, offset, reverse)
-                local p = patch.hunk(model.path, hunk, model.old_text, model.new_text, offset)
-                local ok, err = M.apply_patch(root, p, reverse)
-                if not ok then
-                    local op = reverse and "unstage" or "stage"
-                    notify(("hunk %s failed: %s"):format(op, err or ""), vim.log.levels.ERROR)
-                end
-                return ok
-            end,
-            refresh = function()
-                if panel then
-                    panel:refresh()
-                end
-            end,
-        }
+        if entry.status == "M" then
+            return {
+                initial = entry.staged and "staged" or "unstaged",
+                apply = function(model, hunk, offset, reverse)
+                    local p = patch.hunk(model.path, hunk, model.old_text, model.new_text, offset)
+                    local ok, err = M.apply_patch(root, p, reverse)
+                    if not ok then
+                        local op = reverse and "unstage" or "stage"
+                        notify(("hunk %s failed: %s"):format(op, err or ""), vim.log.levels.ERROR)
+                    end
+                    return ok
+                end,
+                refresh = refresh_panel,
+            }
+        end
+        -- a new file is a single whole-file hunk against an empty side, so there's
+        -- nothing to patch partially: staging that hunk is a whole-file `git add`,
+        -- unstaging a `git reset` back to untracked
+        if entry.status == "?" or entry.status == "A" then
+            return {
+                initial = entry.staged and "staged" or "unstaged",
+                apply = function(_, _, _, reverse)
+                    if reverse then
+                        M.unstage(root, entry.path)
+                    else
+                        M.stage(root, entry.path)
+                    end
+                    return true
+                end,
+                refresh = refresh_panel,
+            }
+        end
+        return nil
     end
 
     panel = Panel.new({
