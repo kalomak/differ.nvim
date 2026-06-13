@@ -121,12 +121,14 @@ function M.resolve(source, root)
 end
 
 -- build a DiffModel for one changed file under an already-resolved source.
--- renames read the old side from `previous_path`; an absent side reads as empty
+-- renames read the old side from `previous_path`; an absent side reads as empty.
+-- `head` (the current branch) rides along for the synthetic buffer's statusline
 ---@param source dipher.git.Source -- resolved (no merge_base refs)
 ---@param root string
 ---@param file dipher.git.ChangedFile|dipher.FileEntry
+---@param head string|nil
 ---@return dipher.DiffModel
-function M.model(source, root, file)
+function M.model(source, root, file, head)
     local old_path = file.previous_path or file.path
     return require("dipher.model.diff").build({
         path = file.path,
@@ -134,7 +136,32 @@ function M.model(source, root, file)
         new_rev = source.new.label,
         old_text = M.read(source.old, root, old_path) or "",
         new_text = M.read(source.new, root, file.path) or "",
+        head = head,
     })
+end
+
+-- the current branch name (for the buffer statusline), or nil on a detached HEAD
+---@param root string
+---@return string|nil
+local function head_branch(root)
+    local out = git({ "rev-parse", "--abbrev-ref", "HEAD" }, root)
+    local name = out and chomp(out) or nil
+    return (name and name ~= "HEAD") and name or nil
+end
+
+-- the "Showing changes for:" footer label (§8.6): the user's rev spec, or the
+-- resolved HEAD commit for the default uncommitted view (mirrors diffview)
+---@param args string[]
+---@param root string
+---@return string|nil
+local function footer_label(args, root)
+    if #args == 0 then
+        local out = git({ "rev-parse", "HEAD" }, root)
+        return out and chomp(out) or nil
+    elseif #args == 2 then
+        return args[1] .. ".." .. args[2]
+    end
+    return table.concat(args, " ")
 end
 
 -- open the diff for one changed file under an already-resolved source
@@ -277,6 +304,7 @@ function M.panel(opts)
     if not source then
         return
     end
+    local branch = head_branch(root) -- once per source, for the buffer statuslines
 
     -- model_for picks the (old, new) pair per entry: working-tree sections diff by
     -- the entry's staged flag (staged = HEAD↔index, else index↔worktree), while a
@@ -287,12 +315,12 @@ function M.panel(opts)
         model_for = function(entry)
             local s = entry.staged and { old = HEAD, new = INDEX }
                 or { old = INDEX, new = WORKTREE }
-            return M.model(s, root, entry)
+            return M.model(s, root, entry, branch)
         end
     else
         sections = { { title = "Changes", entries = M.file_entries(source, root) } }
         model_for = function(entry)
-            return M.model(source, root, entry)
+            return M.model(source, root, entry, branch)
         end
     end
 
@@ -312,6 +340,8 @@ function M.panel(opts)
     local panel = Panel.new({
         sections = nonempty,
         root = vim.fn.fnamemodify(root, ":~"), -- ~-relative repo path for the header
+        footer = footer_label(args, root),
+        quarter_scroll = require("dipher").get_config().keymaps.quarter_scroll,
         listing = opts.listing,
         position = opts.position,
         height = opts.height,

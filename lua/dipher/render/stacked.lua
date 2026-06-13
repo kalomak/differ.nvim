@@ -10,25 +10,34 @@ local walk = require("dipher.render.walk")
 
 local M = {}
 
--- buffer text for a collapsed-context separator. no line numbers (kind=="meta")
----@param hidden integer
----@return string
-local function meta_text(hidden)
-    return ("\u{22ef} %d unchanged line%s"):format(hidden, hidden == 1 and "" or "s")
-end
-
 -- render a model into a single "unified" column: interleaved buffer lines plus
--- a populated line map
+-- a populated line map and the fold ranges (buffer coords) the view collapses
 ---@param model dipher.DiffModel
 ---@param opts { context: integer, deep_diff?: table }
 ---@return dipher.RenderResult
 function M.render(model, opts)
     local map = LineMap.new()
     local lines = {}
+    local folds = {}
+    local fold_start = nil
+
+    -- extend/close the running fold run as lines are pushed; foldable context
+    -- lines accumulate, anything else closes the run at the previous line
+    local function mark(foldable)
+        if foldable then
+            fold_start = fold_start or #lines
+        elseif fold_start then
+            folds[#folds + 1] = { first = fold_start, last = #lines - 1 }
+            fold_start = nil
+        end
+    end
 
     -- identical content produces no hunks; nothing to show
     if #model.hunks == 0 then
-        return { columns = { { lines = lines, map = map, side = "unified" } }, rows = 0 }
+        return {
+            columns = { { lines = lines, map = map, side = "unified", folds = folds } },
+            rows = 0,
+        }
     end
 
     local context = opts.context or 3
@@ -41,13 +50,10 @@ function M.render(model, opts)
     local old_all = text_util.to_lines(model.old_text)
 
     walk.walk(model, context, #old_all, {
-        context = function(o, n)
+        context = function(o, n, foldable)
             lines[#lines + 1] = old_all[o]
             map:push({ kind = "context", old = o, new = n })
-        end,
-        meta = function(hidden)
-            lines[#lines + 1] = meta_text(hidden)
-            map:push({ kind = "meta" })
+            mark(foldable)
         end,
         -- a hunk shows its old (deleted) lines as a block, then its new (added) lines
         hunk = function(h, hi)
@@ -63,6 +69,7 @@ function M.render(model, opts)
                     hunk = hi,
                     spans = old_spans[k],
                 })
+                mark(false)
             end
             for k = 1, h.new_count do
                 lines[#lines + 1] = h.new_lines[k]
@@ -72,11 +79,18 @@ function M.render(model, opts)
                     hunk = hi,
                     spans = new_spans[k],
                 })
+                mark(false)
             end
         end,
     })
+    if fold_start then
+        folds[#folds + 1] = { first = fold_start, last = #lines }
+    end
 
-    return { columns = { { lines = lines, map = map, side = "unified" } }, rows = #lines }
+    return {
+        columns = { { lines = lines, map = map, side = "unified", folds = folds } },
+        rows = #lines,
+    }
 end
 
 return M

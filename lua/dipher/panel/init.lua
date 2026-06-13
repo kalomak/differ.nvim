@@ -10,6 +10,8 @@ local tree = require("dipher.panel.tree")
 local render = require("dipher.panel.render")
 
 local ns = vim.api.nvim_create_namespace("dipher.panel")
+local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
+local CTRL_U = vim.api.nvim_replace_termcodes("<C-u>", true, false, true)
 
 ---@type dipher.Panel|nil -- the live panel, for runtime API (Panel.current())
 local current = nil
@@ -54,6 +56,8 @@ local STATUS_HL = {
 ---@field on_select fun(entry: dipher.FileEntry)
 ---@field on_close fun()|nil
 ---@field root string|nil
+---@field footer string|nil
+---@field quarter_scroll boolean
 ---@field icon_for nil|fun(path: string): string|nil, string|nil
 ---@field position string
 ---@field height integer
@@ -68,6 +72,8 @@ Panel.__index = Panel
 ---@field on_select fun(entry: dipher.FileEntry)
 ---@field on_close? fun()  -- runs on :close (e.g. tear down the driven view)
 ---@field root? string  -- repo/worktree path shown in the panel header
+---@field footer? string -- rev spec shown under "Showing changes for:"
+---@field quarter_scroll? boolean -- f/b quarter-page scroll in the panel (default true)
 ---@field icons? boolean -- filetype devicons (default true when available)
 ---@field listing? "tree"|"flat"
 ---@field position? "bottom"|"top"|"left"|"right"
@@ -98,6 +104,8 @@ function Panel.new(opts)
         on_select = opts.on_select,
         on_close = opts.on_close,
         root = opts.root,
+        footer = opts.footer,
+        quarter_scroll = opts.quarter_scroll ~= false,
         icon_for = opts.icons ~= false and devicon_provider() or nil,
         listing = opts.listing or "tree",
         position = opts.position or "bottom",
@@ -130,7 +138,7 @@ function Panel:render()
             { title = sec.title, rows = tree.rows(root, self.listing, self.collapsed) }
     end
     local header = self.root and { path = self.root, help = "g?" } or nil
-    local out = render.lines(blocks, header, self.icon_for)
+    local out = render.lines(blocks, header, self.icon_for, self.footer)
     self.lines, self.meta = out.lines, out.meta
 
     vim.bo[self.bufnr].modifiable = true
@@ -161,13 +169,21 @@ function Panel:_highlight()
                 0,
                 { end_col = eol, hl_group = "dipherPanelHelp" }
             )
-        elseif m.kind == "header" then
+        elseif m.kind == "header" or m.kind == "foothead" then
             vim.api.nvim_buf_set_extmark(
                 self.bufnr,
                 ns,
                 row,
                 0,
                 { end_col = eol, hl_group = "dipherPanelHeader" }
+            )
+        elseif m.kind == "footrev" then
+            vim.api.nvim_buf_set_extmark(
+                self.bufnr,
+                ns,
+                row,
+                0,
+                { end_col = eol, hl_group = "dipherPanelHelp" }
             )
         elseif m.kind == "dir" then
             vim.api.nvim_buf_set_extmark(
@@ -304,6 +320,18 @@ function Panel:goto_file(direction, keep_focus)
     end
 end
 
+-- f / b: scroll the panel a quarter page, matching the diff view's motion so it
+-- works in either window. named `scroll` (not `quarter_scroll`) to avoid shadowing
+-- the boolean `self.quarter_scroll` field, which would break the method lookup
+---@param direction "down"|"up"
+function Panel:scroll(direction)
+    if not self:is_open() then
+        return
+    end
+    local n = math.max(1, math.floor(vim.api.nvim_win_get_height(self.winid) / 4))
+    vim.api.nvim_feedkeys(n .. (direction == "down" and CTRL_D or CTRL_U), "nx", false)
+end
+
 -- g?: a floating keymap cheatsheet, dismissed with <Esc> / g?
 function Panel:show_help()
     local lines = {
@@ -386,6 +414,14 @@ function Panel:_setup_window()
     map("g?", function()
         self:show_help()
     end, "help")
+    if self.quarter_scroll then
+        map("f", function()
+            self:scroll("down")
+        end, "scroll down a quarter page")
+        map("b", function()
+            self:scroll("up")
+        end, "scroll up a quarter page")
+    end
 end
 
 -- create the split in the configured position, bind the buffer, set window opts

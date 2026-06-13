@@ -11,6 +11,8 @@ local function render(model, opts)
         new_lines = r.columns[2].lines,
         old_map = r.columns[1].map,
         new_map = r.columns[2].map,
+        old_folds = r.columns[1].folds,
+        new_folds = r.columns[2].folds,
     }
 end
 
@@ -147,7 +149,7 @@ describe("render.split word-level spans", function()
 end)
 
 describe("render.split context collapsing", function()
-    it("collapses far gaps to an aligned meta row on both sides", function()
+    it("emits full content on both sides and marks the far gap foldable", function()
         local model = {
             path = "x",
             old_rev = "A",
@@ -167,8 +169,10 @@ describe("render.split context collapsing", function()
         }
         local r = render(model, { context = 1 })
         assert.are.equal(#r.old_lines, #r.new_lines)
-        assert.are.equal("meta", r.old_map.lines[#r.old_lines].kind)
-        assert.are.equal("meta", r.new_map.lines[#r.new_lines].kind)
+        assert.are.equal(7, #r.old_lines) -- full content, nothing dropped
+        -- lines 4..7 (the gap middle after hunk 1) fold; both columns share the range
+        assert.are.same({ { first = 4, last = 7 } }, r.old_folds)
+        assert.are.same({ { first = 4, last = 7 } }, r.new_folds)
     end)
 end)
 

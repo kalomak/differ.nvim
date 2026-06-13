@@ -98,11 +98,13 @@ describe(":Dipher panel", function()
         end
     end
 
-    -- the buffer minus the root/help/blank header so section content can be asserted
-    -- without depending on the (temp-dir) repo path
+    -- the section content only: strip the 3-line header (root/help/blank) and the
+    -- 3-line footer (blank/"Showing changes for:"/rev) so assertions don't depend on
+    -- the temp-dir path or the HEAD sha
     local function body(p)
         assert.are.equal("Help: g?", p.lines[2]) -- header present
-        return vim.list_slice(p.lines, 4)
+        assert.are.equal("Showing changes for:", p.lines[#p.lines - 1]) -- footer present
+        return vim.list_slice(p.lines, 4, #p.lines - 3)
     end
 
     it("opens the default panel as a single Unstaged section and toggles closed", function()
@@ -119,6 +121,25 @@ describe(":Dipher panel", function()
 
         git_src.panel({}) -- toggle
         assert.is_nil(Panel.current())
+    end)
+
+    it("binds f/b quarter-scroll in the panel window too", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({})
+        local p = Panel.current()
+        local lhs = {}
+        for _, m in ipairs(vim.api.nvim_buf_get_keymap(p.bufnr, "n")) do
+            lhs[m.lhs] = true
+        end
+        assert.is_true(lhs["f"])
+        assert.is_true(lhs["b"])
+        -- invoking must not error (regression: the method was shadowed by the field)
+        p:scroll("down")
+        p:scroll("up")
+        p:close()
     end)
 
     it("groups staged / unstaged / untracked into sections with counts", function()
@@ -215,6 +236,28 @@ describe(":Dipher (open_first)", function()
         assert.are.equal("a.lua", v.model.path)
         assert.are.equal(V1, v.model.old_text) -- index (nothing staged) == HEAD
         assert.are.equal("local x = 2\nreturn x\n", v.model.new_text) -- worktree
+        -- the default footer is the HEAD commit (a 40-char hex sha)
+        assert.are.equal("Showing changes for:", p.lines[#p.lines - 1])
+        local sha = p.lines[#p.lines]
+        assert.are.equal(40, #sha)
+        assert.is_truthy(sha:match("^%x+$"))
+        p:close()
+    end)
+
+    it("populates gitsigns status vars on the diff buffer for the statusline", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- one changed line
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local buf = vim.api.nvim_win_get_buf(p.origin_win)
+        local dict = vim.b[buf].gitsigns_status_dict
+        assert.is_not_nil(dict)
+        assert.are.equal(1, dict.changed) -- "1" -> "2" is a single changed line
+        assert.are.equal(0, dict.added)
+        assert.are.equal(0, dict.removed)
+        assert.are.equal("main", vim.b[buf].gitsigns_head)
         p:close()
     end)
 

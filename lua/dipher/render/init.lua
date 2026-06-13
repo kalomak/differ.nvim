@@ -8,10 +8,15 @@
 
 ---@alias dipher.ColumnSide "old"|"new"|"unified"
 
+---@class dipher.FoldRange
+---@field first integer -- 1-based buffer line, inclusive
+---@field last integer
+
 ---@class dipher.Column
----@field lines string[]        -- this column's buffer content (filler rows = "")
----@field map dipher.LineMap    -- this column's line map
+---@field lines string[]            -- this column's buffer content (filler rows = "")
+---@field map dipher.LineMap        -- this column's line map
 ---@field side dipher.ColumnSide
+---@field folds dipher.FoldRange[]  -- unchanged regions to collapse as native folds
 
 ---@class dipher.RenderResult
 ---@field columns dipher.Column[] -- one per buffer; all share `rows`

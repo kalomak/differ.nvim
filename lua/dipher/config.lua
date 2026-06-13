@@ -13,7 +13,7 @@ local M = {}
 ---@type dipher.Config
 M.defaults = {
     layout = "stacked",
-    context = 3,
+    context = 10, -- generous default; tight context makes diffs hard to read
     deep_diff = {
         enabled = true,
         granularity = "word",

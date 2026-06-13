@@ -9,7 +9,7 @@ local INDENT = "  "
 local FOLD_OPEN, FOLD_CLOSED = "▾", "▸"
 
 ---@class dipher.panel.LineMeta
----@field kind "root"|"help"|"blank"|"header"|"dir"|"file"
+---@field kind "root"|"help"|"blank"|"header"|"dir"|"file"|"foothead"|"footrev"
 ---@field entry dipher.FileEntry|nil
 ---@field path string|nil
 ---@field status string|nil
@@ -45,14 +45,16 @@ end
 ---@field help string|nil   -- keymap hint (rendered as "Help: <help>")
 
 -- build the panel buffer lines and a parallel metadata list (one per line). an
--- optional header (repo path + `Help: g?` + blank) prefixes the sections (§8.6).
+-- optional header (repo path + `Help: g?` + blank) prefixes the sections (§8.6),
+-- and an optional `footer` rev appends a "Showing changes for:" block.
 -- `icon_for(path)` (supplied by the runtime layer, nvim-web-devicons, so this
 -- stays pure) returns a `(glyph, hl_group)` pair painted before each filename
 ---@param blocks dipher.panel.Block[]
 ---@param header dipher.panel.Header|nil
 ---@param icon_for nil|fun(path: string): string|nil, string|nil
+---@param footer string|nil  -- rev spec shown under "Showing changes for:"
 ---@return { lines: string[], meta: dipher.panel.LineMeta[] }
-function M.lines(blocks, header, icon_for)
+function M.lines(blocks, header, icon_for, footer)
     local lines, meta = {}, {}
     if header then
         if header.path then
@@ -112,6 +114,14 @@ function M.lines(blocks, header, icon_for)
                 meta[#meta + 1] = m
             end
         end
+    end
+    if footer then
+        lines[#lines + 1] = ""
+        meta[#meta + 1] = { kind = "blank" }
+        lines[#lines + 1] = "Showing changes for:"
+        meta[#meta + 1] = { kind = "foothead" }
+        lines[#lines + 1] = footer
+        meta[#meta + 1] = { kind = "footrev" }
     end
     return { lines = lines, meta = meta }
 end

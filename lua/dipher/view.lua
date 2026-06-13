@@ -12,6 +12,7 @@ local nav = require("dipher.nav")
 
 local ns = vim.api.nvim_create_namespace("dipher")
 local STATUSCOLUMN_EXPR = '%!v:lua.require("dipher.ui.statuscolumn").render()'
+local FOLDTEXT_EXPR = 'v:lua.require("dipher.ui.foldtext").render()'
 local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
 local CTRL_U = vim.api.nvim_replace_termcodes("<C-u>", true, false, true)
 
@@ -52,16 +53,20 @@ function View.new(model, opts)
     return self
 end
 
--- a stable, file-shaped buffer name so the statusline/winbar shows the file + revs
--- instead of `[Scratch]` (§8.1). the `dipher://` scheme + nofile buftype keep it
--- non-editable; the side segment keeps a split's two columns distinct, and the
--- path stays last so `:t` resolves to the real basename
+-- a stable, file-shaped buffer name so the statusline/winbar shows the file path
+-- instead of `[Scratch]` (§8.1). the `dipher://` scheme keeps it distinct from the
+-- real file (a bare relative name would resolve to the same absolute path and
+-- collide) and marks it non-editable; the path stays last so `:t` is the basename.
+-- the default stacked view is just `dipher://<path>`; a split's two columns get an
+-- old/new segment to stay distinct
 ---@param model dipher.DiffModel
 ---@param side dipher.ColumnSide
 ---@return string
 local function buf_name(model, side)
-    local revs = ("%s..%s"):format(model.old_rev or "OLD", model.new_rev or "NEW")
-    return ("dipher://%s/%s/%s"):format(revs, side, model.path)
+    if side == "unified" then
+        return "dipher://" .. model.path
+    end
+    return ("dipher://%s/%s"):format(side, model.path)
 end
 
 -- name `bufnr` for `side`, falling back to a bufnr-suffixed name if that exact
@@ -89,6 +94,24 @@ local function set_filetype(bufnr, path)
     end
     pcall(vim.treesitter.stop, bufnr)
     vim.bo[bufnr].syntax = "OFF"
+end
+
+-- gitsigns never attaches to our synthetic buffers, so a lualine that reads its
+-- status dict shows no branch/diffstat. populate those vars ourselves from the
+-- model: counts come from the hunks, the branch from model.head (frontend-set)
+---@param bufnr integer
+---@param model dipher.DiffModel
+local function set_git_status(bufnr, model)
+    local added, changed, removed = 0, 0, 0
+    for _, h in ipairs(model.hunks) do
+        local common = math.min(h.old_count, h.new_count)
+        changed = changed + common
+        added = added + (h.new_count - common)
+        removed = removed + (h.old_count - common)
+    end
+    vim.b[bufnr].gitsigns_status_dict =
+        { added = added, changed = changed, removed = removed, head = model.head }
+    vim.b[bufnr].gitsigns_head = model.head
 end
 
 -- the map for a side, or the unified map. consumers (]c, staging, comment
@@ -119,6 +142,7 @@ function View:rerender(opts)
         local bufnr = existing and existing.bufnr or vim.api.nvim_create_buf(false, true)
         name_buffer(bufnr, self.model, col.side)
         set_filetype(bufnr, self.model.path)
+        set_git_status(bufnr, self.model)
         vim.bo[bufnr].modifiable = true
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, col.lines)
         vim.bo[bufnr].modifiable = false
@@ -130,6 +154,7 @@ function View:rerender(opts)
             winid = existing and existing.winid or nil,
             map = col.map,
             side = col.side,
+            folds = col.folds,
         }
         by_buf[bufnr] = self
     end
@@ -137,6 +162,31 @@ function View:rerender(opts)
     for i = #result.columns + 1, #self.columns do
         self:_discard(self.columns[i])
         self.columns[i] = nil
+    end
+    self:_apply_folds() -- no-op until windows exist (open / relayout re-apply)
+end
+
+-- (re)create the native folds for each column's window from its fold ranges, then
+-- close them (collapsed by default). re-run on every render so a context change
+-- (d= / d- / :Dipher context) just re-folds without touching buffer content. with
+-- context = full the renderer returns no ranges, so everything is left open.
+function View:_apply_folds()
+    for _, col in ipairs(self.columns) do
+        local win = col.winid
+        if win and vim.api.nvim_win_is_valid(win) then
+            vim.wo[win].foldmethod = "manual"
+            vim.wo[win].foldtext = FOLDTEXT_EXPR
+            vim.wo[win].foldenable = true
+            vim.wo[win].foldlevel = 0 -- collapsed by default
+            vim.api.nvim_win_call(win, function()
+                vim.cmd("silent! normal! zE") -- drop existing folds before rebuilding
+                for _, f in ipairs(col.folds or {}) do
+                    if f.last > f.first then
+                        vim.cmd(("silent! %d,%dfold"):format(f.first, f.last))
+                    end
+                end
+            end)
+        end
     end
 end
 
@@ -312,6 +362,7 @@ function View:_relayout()
         vim.api.nvim_set_current_win(self.columns[1].winid)
         vim.cmd("syncbind")
     end
+    self:_apply_folds() -- windows now exist; collapse the unchanged regions
 end
 
 -- open the view: stacked takes the current window, split adds a scroll-bound pane

@@ -84,30 +84,30 @@ describe("render.stacked context collapsing", function()
         },
     }
 
-    it("keeps context window and collapses the middle to a meta line", function()
+    it("emits full content and marks the far gap's middle foldable", function()
         local r = render(model, { context = 1 })
+        -- every line is rendered (nothing dropped); the buffer holds full content
         assert.are.same({
-            "1", -- leading context (lead=0 at file start, but tail=1 of hunk 1 shows line 1)
-            "2", -- old
-            "X", -- new
-            "3", -- trailing context of hunk 1
-            "\u{22ef} 3 unchanged lines", -- 4,5,6 hidden
-            "7", -- leading context of hunk 2
-            "8", -- old
-            "Y", -- new
-            "9", -- trailing context of hunk 2
+            "1", -- 1 context (tail of file start / lead of hunk 1)
+            "2", -- 2 old
+            "X", -- 3 new
+            "3", -- 4 trailing context of hunk 1
+            "4", -- 5 foldable middle (4,5,6)
+            "5", -- 6 foldable
+            "6", -- 7 foldable
+            "7", -- 8 leading context of hunk 2
+            "8", -- 9 old
+            "Y", -- 10 new
+            "9", -- 11 trailing context
         }, r.lines)
-        assert.are.equal("meta", r.map.lines[5].kind)
-        assert.is_nil(r.map.lines[5].old)
-        assert.is_nil(r.map.lines[5].new)
+        -- the middle 3 lines (buffer rows 5..7) collapse under a native fold
+        assert.are.same({ { first = 5, last = 7 } }, r.folds)
     end)
 
-    it("never emits a meta line under full context", function()
+    it("marks nothing foldable under full context", function()
         local r = render(model, { context = FULL })
-        for _, l in ipairs(r.map.lines) do
-            assert.are_not.equal("meta", l.kind)
-        end
-        assert.are.equal(9 + 2, #r.lines) -- 9 unchanged-positions + 2 added (X,Y); deletions overlap
+        assert.are.same({}, r.folds)
+        assert.are.equal(9 + 2, #r.lines) -- still full content: 9 unchanged + 2 added (X,Y)
     end)
 end)
 

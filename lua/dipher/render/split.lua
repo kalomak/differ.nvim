@@ -4,8 +4,9 @@
 -- real code lines must stay yankable/searchable, so side-by-side is two columns
 -- (two buffers), not one buffer of "old | new" cells. this renderer emits two
 -- index-aligned line sequences plus a LineMap per side (each conforming to the
--- frozen contract verbatim). filler cells and collapsed-context separators are
--- kind=="meta" rows with empty/marker text so both columns stay row-aligned
+-- frozen contract verbatim). filler cells (hunk padding) are kind=="meta" rows
+-- with empty text so both columns stay row-aligned; unchanged regions are emitted
+-- in full and collapsed by native folds, not dropped
 
 local LineMap = require("dipher.render.linemap")
 local text_util = require("dipher.util.text")
@@ -14,19 +15,16 @@ local walk = require("dipher.render.walk")
 
 local M = {}
 
----@param hidden integer
----@return string
-local function meta_text(hidden)
-    return ("\u{22ef} %d unchanged line%s"):format(hidden, hidden == 1 and "" or "s")
-end
-
--- render a model into two index-aligned columns ("old" left, "new" right)
+-- render a model into two index-aligned columns ("old" left, "new" right). both
+-- columns share the same fold ranges since their rows are aligned
 ---@param model dipher.DiffModel
 ---@param opts { context: integer, deep_diff?: table }
 ---@return dipher.RenderResult
 function M.render(model, opts)
     local old_map, new_map = LineMap.new(), LineMap.new()
     local old_lines, new_lines = {}, {}
+    local folds = {}
+    local fold_start = nil
 
     -- push one aligned row, keeping both columns the same length
     ---@param ltext string|nil
@@ -40,11 +38,21 @@ function M.render(model, opts)
         new_map:push(rrail)
     end
 
+    -- extend/close the running fold run over the aligned rows
+    local function mark(foldable)
+        if foldable then
+            fold_start = fold_start or #old_lines
+        elseif fold_start then
+            folds[#folds + 1] = { first = fold_start, last = #old_lines - 1 }
+            fold_start = nil
+        end
+    end
+
     local function result()
         return {
             columns = {
-                { lines = old_lines, map = old_map, side = "old" },
-                { lines = new_lines, map = new_map, side = "new" },
+                { lines = old_lines, map = old_map, side = "old", folds = folds },
+                { lines = new_lines, map = new_map, side = "new", folds = folds },
             },
             rows = #old_lines,
         }
@@ -63,13 +71,14 @@ function M.render(model, opts)
     local old_all = text_util.to_lines(model.old_text)
 
     walk.walk(model, context, #old_all, {
-        context = function(o, n)
-            local rail = { kind = "context", old = o, new = n }
-            push_row(old_all[o], rail, old_all[o], { kind = "context", old = o, new = n })
-        end,
-        meta = function(hidden)
-            local t = meta_text(hidden)
-            push_row(t, { kind = "meta" }, t, { kind = "meta" })
+        context = function(o, n, foldable)
+            push_row(
+                old_all[o],
+                { kind = "context", old = o, new = n },
+                old_all[o],
+                { kind = "context", old = o, new = n }
+            )
+            mark(foldable)
         end,
         -- side-by-side aligns old[i] with new[i] positionally and pads the shorter
         -- side with filler. word spans are computed per positionally-paired row;
@@ -96,9 +105,13 @@ function M.render(model, opts)
                     has_new and h.new_lines[i] or nil,
                     rrail
                 )
+                mark(false)
             end
         end,
     })
+    if fold_start then
+        folds[#folds + 1] = { first = fold_start, last = #old_lines }
+    end
 
     return result()
 end

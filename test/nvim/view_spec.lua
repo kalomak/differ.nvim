@@ -215,14 +215,8 @@ describe("view layout toggle", function()
 end)
 
 describe("view context controls", function()
-    local function meta_count(view)
-        local n = 0
-        for _, l in ipairs(view.columns[1].map.lines) do
-            if l.kind == "meta" then
-                n = n + 1
-            end
-        end
-        return n
+    local function fold_count(view)
+        return #(view.columns[1].folds or {})
     end
 
     -- two hunks with a 5-line gap between them
@@ -234,14 +228,32 @@ describe("view context controls", function()
         })
     end
 
-    it("collapses context, producing a meta separator", function()
+    it("collapses context into a fold, and opens it again at full context", function()
         local v = gap_view()
         v:open()
-        assert.are.equal(0, meta_count(v)) -- whole file: nothing hidden
+        assert.are.equal(0, fold_count(v)) -- whole file: nothing folded
         v:set_context(1)
-        assert.are.equal(1, meta_count(v)) -- the 5-line gap collapses
+        assert.are.equal(1, fold_count(v)) -- the 5-line gap folds
         v:set_context(math.huge)
-        assert.are.equal(0, meta_count(v))
+        assert.are.equal(0, fold_count(v))
+        v:close()
+    end)
+
+    it("creates a closed native fold over the collapsed region in the window", function()
+        local v = View.new(model("1\n2\n3\n4\n5\n6\n7\n8\n9\n", "1\nX\n3\n4\n5\n6\n7\nY\n9\n"), {
+            layout = "stacked",
+            context = 1,
+            deep_diff = { enabled = true },
+        })
+        v:open()
+        local win = v.columns[1].winid
+        assert.are.equal("manual", vim.wo[win].foldmethod)
+        -- buffer rows 5..7 are the foldable middle; row 5 starts a closed fold so
+        -- native za/zo/zc/zm all act on a real fold
+        local closed_start = vim.api.nvim_win_call(win, function()
+            return vim.fn.foldclosed(5)
+        end)
+        assert.are.equal(5, closed_start)
         v:close()
     end)
 
@@ -275,7 +287,7 @@ describe("view re-source", function()
         v:close()
     end)
 
-    it("names the buffer after the file + revs and renames on re-source", function()
+    it("names the stacked buffer dipher://<path> and renames on re-source", function()
         local function named(path)
             return diff.build({
                 path = path,
@@ -293,11 +305,28 @@ describe("view re-source", function()
         v:open()
         local buf = v.columns[1].bufnr
         local name = vim.api.nvim_buf_get_name(buf)
-        assert.is_truthy(name:find("dipher://HEAD..WORKTREE/unified/lua/a.lua", 1, true))
+        -- clean name: scheme + path only, no revs/side noise
+        assert.is_truthy(name:find("dipher://lua/a.lua", 1, true))
         assert.are.equal("a.lua", vim.fn.fnamemodify(name, ":t")) -- statusline shows the basename
 
         v:set_source(named("lua/b.lua"))
-        assert.is_truthy(vim.api.nvim_buf_get_name(buf):find("lua/b.lua", 1, true))
+        assert.is_truthy(vim.api.nvim_buf_get_name(buf):find("dipher://lua/b.lua", 1, true))
+        v:close()
+    end)
+
+    it("disambiguates a split's two columns with an old/new segment", function()
+        local v = View.new(model("a\nb\n", "a\nB\n"), {
+            layout = "split",
+            context = math.huge,
+            deep_diff = { enabled = true },
+        })
+        v:open()
+        assert.is_truthy(
+            vim.api.nvim_buf_get_name(v.columns[1].bufnr):find("dipher://old/x", 1, true)
+        )
+        assert.is_truthy(
+            vim.api.nvim_buf_get_name(v.columns[2].bufnr):find("dipher://new/x", 1, true)
+        )
         v:close()
     end)
 

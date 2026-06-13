@@ -16,6 +16,7 @@
 ---@field hunks dipher.Hunk[]
 ---@field old_text string
 ---@field new_text string
+---@field head string|nil  -- git branch, for the synthetic buffer's statusline (set by the frontend)
 
 local text_util = require("dipher.util.text")
 local to_lines = text_util.to_lines
@@ -37,7 +38,7 @@ local function slice(lines, start, count)
 end
 
 -- build a DiffModel from old/new file contents
----@param opts { path: string, old_rev: string, new_rev: string, old_text: string, new_text: string }
+---@param opts { path: string, old_rev: string, new_rev: string, old_text: string, new_text: string, head?: string }
 ---@return dipher.DiffModel
 function M.build(opts)
     local old_lines = to_lines(opts.old_text)
@@ -70,6 +71,7 @@ function M.build(opts)
         hunks = hunks,
         old_text = opts.old_text,
         new_text = opts.new_text,
+        head = opts.head,
     }
 end
 

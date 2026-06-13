@@ -5,13 +5,17 @@
 
 local M = {}
 
+-- context: one unchanged line (old lnum o, new lnum n); foldable marks a line in
+-- the collapsible middle of a gap. hunk: a changed block
 ---@class dipher.WalkCallbacks
----@field context fun(o: integer, n: integer) -- one unchanged line (old lnum o, new lnum n)
----@field meta fun(hidden: integer)           -- a collapsed-context separator hiding `hidden` lines
+---@field context fun(o: integer, n: integer, foldable: boolean)
 ---@field hunk fun(h: dipher.Hunk, hi: integer)
 
 -- drive the walk. `old_line_count` is #to_lines(old_text); `context` may be
--- math.huge for whole-file view. callers handle the empty (no-hunk) case
+-- math.huge for whole-file view. callers handle the empty (no-hunk) case.
+-- every unchanged line is emitted (the buffer holds full content); the middle of
+-- a gap that exceeds `context` lead/tail is flagged `foldable` so the renderer can
+-- mark it for a native fold rather than dropping it (§8.3)
 ---@param model dipher.DiffModel
 ---@param context integer
 ---@param old_line_count integer
@@ -19,25 +23,16 @@ local M = {}
 function M.walk(model, context, old_line_count, cb)
     -- emit an unchanged region [old_from..] / [new_from..] of length `len`,
     -- keeping `lead` context lines at the start and `tail` at the end (0 at a
-    -- file boundary) and collapsing the middle to a separator when it exceeds them
+    -- file boundary) and flagging the middle foldable when it exceeds them
     local function emit_gap(old_from, new_from, len, has_prev, has_next)
         if len <= 0 then
             return
         end
         local lead = math.min(has_prev and context or 0, len)
         local tail = math.min(has_next and context or 0, len)
-        if lead + tail >= len then
-            for k = 0, len - 1 do
-                cb.context(old_from + k, new_from + k)
-            end
-            return
-        end
-        for k = 0, lead - 1 do
-            cb.context(old_from + k, new_from + k)
-        end
-        cb.meta(len - lead - tail)
-        for k = len - tail, len - 1 do
-            cb.context(old_from + k, new_from + k)
+        for k = 0, len - 1 do
+            local foldable = k >= lead and k < len - tail
+            cb.context(old_from + k, new_from + k, foldable)
         end
     end
 
