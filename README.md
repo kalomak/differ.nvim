@@ -208,7 +208,8 @@ Each phase ships independently. Phases 1 and 2 alone replace daily diffview use.
 ## Development
 
 ```sh
-make test        # pure-Lua unit tests (busted, no Neovim)
+make test        # both suites (unit + headless-nvim)
+make test-unit   # pure-Lua unit tests only (busted, no Neovim)
 make test-nvim   # headless-nvim tests (needs nlua on PATH)
 make lint        # luacheck + stylua --check
 make check       # full quality gate

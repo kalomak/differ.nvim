@@ -17,21 +17,21 @@ OK   := printf "$(GREEN)✓$(NC) %s\n"
 GO_PKG  := ./cmd/dipher-sidecar
 GO_BIN  := bin/dipher-sidecar
 
-.PHONY: help test test-nvim test-all lint fmt fmt-check go-build go-test go-vet check clean
+.PHONY: help test test-unit test-nvim lint fmt fmt-check go-build go-test go-vet check clean
 
 # ──────────────────────────────────────────────────────────────────────────────
 ##@ Lua
 # ──────────────────────────────────────────────────────────────────────────────
 
-test: ## Run pure-Lua unit tests (no Neovim runtime)
+test: test-unit test-nvim ## Run both unit and headless-nvim suites
+
+test-unit: ## Run pure-Lua unit tests only (fast, no Neovim runtime)
 	@$(INFO) "Running unit tests"
 	@busted --run unit
 
 test-nvim: ## Run headless-nvim tests (needs nlua on PATH)
 	@$(INFO) "Running headless-nvim tests"
 	@eval $$(luarocks --lua-version=5.1 path) && busted --lua=nlua test/nvim
-
-test-all: test test-nvim ## Run both unit and headless-nvim suites
 
 lint: ## Luacheck + stylua --check on Lua sources
 	@$(INFO) "Linting"
@@ -65,7 +65,7 @@ go-vet: ## Run go vet over the module
 ##@ Aggregate
 # ──────────────────────────────────────────────────────────────────────────────
 
-check: lint test test-nvim go-vet go-test ## Run the full quality gate
+check: lint test go-vet go-test ## Run the full quality gate
 
 clean: ## Remove build artefacts
 	@rm -rf bin dipher-sidecar
