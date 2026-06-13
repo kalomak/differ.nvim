@@ -25,7 +25,8 @@ func (d Deps) listPRs(ctx context.Context, params json.RawMessage) (any, error) 
 	return d.GH.ListPRs(ctx, p.Owner, p.Repo, p.Filter)
 }
 
-type getPRParams struct {
+// prParams is the {owner, repo, number} shorthand shared by the PR-scoped methods.
+type prParams struct {
 	Owner  string `json:"owner"`
 	Repo   string `json:"repo"`
 	Number int    `json:"number"`
@@ -33,15 +34,12 @@ type getPRParams struct {
 
 // getPR returns full PR detail incl. per-file viewed state and rename info (§7.3).
 func (d Deps) getPR(ctx context.Context, params json.RawMessage) (any, error) {
-	var p getPRParams
+	var p prParams
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	if err := requireRepo(p.Owner, p.Repo); err != nil {
+	if err := requirePR(p.Owner, p.Repo, p.Number); err != nil {
 		return nil, err
-	}
-	if p.Number <= 0 {
-		return nil, protocol.NewError(protocol.CodeBadRequest, "number is required")
 	}
 	return d.GH.GetPR(ctx, p.Owner, p.Repo, p.Number)
 }
@@ -49,6 +47,16 @@ func (d Deps) getPR(ctx context.Context, params json.RawMessage) (any, error) {
 func requireRepo(owner, repo string) error {
 	if owner == "" || repo == "" {
 		return protocol.NewError(protocol.CodeBadRequest, "owner and repo are required")
+	}
+	return nil
+}
+
+func requirePR(owner, repo string, number int) error {
+	if err := requireRepo(owner, repo); err != nil {
+		return err
+	}
+	if number <= 0 {
+		return protocol.NewError(protocol.CodeBadRequest, "number is required")
 	}
 	return nil
 }

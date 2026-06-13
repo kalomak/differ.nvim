@@ -66,3 +66,112 @@ type pageInfoGQL struct {
 	HasNextPage bool   `json:"hasNextPage"`
 	EndCursor   string `json:"endCursor"`
 }
+
+// prRefsDTO is the slice of REST /pulls/{n} get_file_versions resolves the base
+// and head commit SHAs from (lighter than the get_pr GraphQL meta).
+type prRefsDTO struct {
+	Base struct {
+		SHA string `json:"sha"`
+	} `json:"base"`
+	Head struct {
+		SHA string `json:"sha"`
+	} `json:"head"`
+}
+
+// threadsGQL is the get_threads GraphQL response: a page of review threads, each
+// with its diff anchor and comments. line/startLine are null on outdated threads.
+type threadsGQL struct {
+	Repository struct {
+		PullRequest struct {
+			ReviewThreads struct {
+				Nodes []struct {
+					ID         string `json:"id"`
+					IsResolved bool   `json:"isResolved"`
+					Path       string `json:"path"`
+					Line       *int   `json:"line"`
+					StartLine  *int   `json:"startLine"`
+					DiffSide   string `json:"diffSide"`
+					StartSide  string `json:"startDiffSide"`
+					Comments   struct {
+						Nodes []commentGQL `json:"nodes"`
+					} `json:"comments"`
+				} `json:"nodes"`
+				PageInfo pageInfoGQL `json:"pageInfo"`
+			} `json:"reviewThreads"`
+		} `json:"pullRequest"`
+	} `json:"repository"`
+}
+
+// commentGQL is one review-thread comment. fullDatabaseId is a BigInt serialized
+// as a string (the numeric comment id, the reply anchor); state is PENDING on an
+// unsubmitted draft.
+type commentGQL struct {
+	FullDatabaseID string   `json:"fullDatabaseId"`
+	Author         loginDTO `json:"author"`
+	Body           string   `json:"body"`
+	CreatedAt      string   `json:"createdAt"`
+	State          string   `json:"state"`
+}
+
+// pendingReviewGQL is the get_pending_review GraphQL response: the viewer's single
+// pending review (if any) with its draft comments.
+type pendingReviewGQL struct {
+	Repository struct {
+		PullRequest struct {
+			Reviews struct {
+				Nodes []struct {
+					ID       string `json:"id"`
+					Comments struct {
+						Nodes []struct {
+							FullDatabaseID string `json:"fullDatabaseId"`
+							Path           string `json:"path"`
+							DiffSide       string `json:"diffSide"`
+							Line           *int   `json:"line"`
+							StartLine      *int   `json:"startLine"`
+							StartSide      string `json:"startDiffSide"`
+							Body           string `json:"body"`
+						} `json:"nodes"`
+					} `json:"comments"`
+				} `json:"nodes"`
+			} `json:"reviews"`
+		} `json:"pullRequest"`
+	} `json:"repository"`
+}
+
+// checksGQL is the get_checks GraphQL response: the rollup on the PR's head commit.
+// statusCheckRollup is null when no checks are configured.
+type checksGQL struct {
+	Repository struct {
+		PullRequest struct {
+			Commits struct {
+				Nodes []struct {
+					Commit struct {
+						StatusCheckRollup *struct {
+							State    string `json:"state"`
+							Contexts struct {
+								Nodes []checkContextGQL `json:"nodes"`
+							} `json:"contexts"`
+						} `json:"statusCheckRollup"`
+					} `json:"commit"`
+				} `json:"nodes"`
+			} `json:"commits"`
+		} `json:"pullRequest"`
+	} `json:"repository"`
+}
+
+// checkContextGQL is one rollup context; Typename selects the CheckRun fields from
+// the StatusContext fields (the two halves of the union).
+type checkContextGQL struct {
+	Typename string `json:"__typename"`
+	// CheckRun
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	DetailsURL string `json:"detailsUrl"`
+	StartedAt  string `json:"startedAt"`
+	// StatusContext
+	Context   string `json:"context"`
+	State     string `json:"state"`
+	TargetURL string `json:"targetUrl"`
+	CreatedAt string `json:"createdAt"`
+}

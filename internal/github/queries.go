@@ -30,3 +30,104 @@ query GetPR($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
     }
   }
 }`
+
+// getThreadsQuery fetches the PR's review threads (paginated) with their comments.
+// diffSide/startDiffSide carry the LEFT/RIGHT anchor (§6.2); the comment state
+// distinguishes a submitted thread from an unsubmitted draft (is_pending). inner
+// comments are capped at 100 (threads rarely exceed that).
+const getThreadsQuery = `
+query GetThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        nodes {
+          id
+          isResolved
+          path
+          line
+          startLine
+          diffSide
+          startDiffSide
+          comments(first: 100) {
+            nodes {
+              fullDatabaseId
+              author { login }
+              body
+              createdAt
+              state
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}`
+
+// getPendingReviewQuery fetches the viewer's unsubmitted draft review. pending
+// reviews are private to their author, so reviews(states: [PENDING]) scopes to the
+// viewer; a user has at most one pending review per PR.
+const getPendingReviewQuery = `
+query GetPendingReview($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviews(first: 1, states: [PENDING]) {
+        nodes {
+          id
+          comments(first: 100) {
+            nodes {
+              fullDatabaseId
+              path
+              diffSide
+              line
+              startLine
+              startDiffSide
+              body
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+// getChecksQuery fetches the status-check rollup for the PR's head commit. contexts
+// is a union of CheckRun (modern checks) and StatusContext (legacy commit statuses);
+// both are normalised to a common shape in checks.go.
+const getChecksQuery = `
+query GetChecks($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            statusCheckRollup {
+              state
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    name
+                    status
+                    conclusion
+                    detailsUrl
+                    startedAt
+                  }
+                  ... on StatusContext {
+                    context
+                    state
+                    targetUrl
+                    createdAt
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`

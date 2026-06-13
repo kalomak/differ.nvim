@@ -1,0 +1,102 @@
+package github
+
+import (
+	"context"
+	"strconv"
+)
+
+// GetThreads returns the PR's review threads with their comments, paginating the
+// thread list. inner comment lists are capped at 100 (threads rarely exceed that;
+// the cap is revisited with caching). per thread, ID is the root comment's numeric
+// id (the reply anchor), ThreadID is the GraphQL node id resolve_thread targets,
+// and IsPending marks an unsubmitted draft (root comment in PENDING state).
+func (c *Client) GetThreads(ctx context.Context, owner, repo string, number int) ([]Thread, error) {
+	var out []Thread
+	cursor := ""
+	for {
+		var page threadsGQL
+		vars := map[string]any{"owner": owner, "repo": repo, "number": number}
+		if cursor != "" {
+			vars["cursor"] = cursor
+		}
+		if err := c.graphql(ctx, getThreadsQuery, vars, &page); err != nil {
+			return nil, err
+		}
+		threads := page.Repository.PullRequest.ReviewThreads
+		for _, n := range threads.Nodes {
+			t := Thread{
+				ThreadID:  n.ID,
+				Path:      n.Path,
+				Side:      n.DiffSide,
+				Line:      deref(n.Line),
+				StartSide: n.StartSide,
+				StartLine: deref(n.StartLine),
+				Resolved:  n.IsResolved,
+				Comments:  make([]ThreadComment, 0, len(n.Comments.Nodes)),
+			}
+			for _, cm := range n.Comments.Nodes {
+				t.Comments = append(t.Comments, ThreadComment{
+					ID:        parseID(cm.FullDatabaseID),
+					Author:    cm.Author.Login,
+					Body:      cm.Body,
+					CreatedAt: cm.CreatedAt,
+				})
+			}
+			if len(n.Comments.Nodes) > 0 {
+				root := n.Comments.Nodes[0]
+				t.ID = parseID(root.FullDatabaseID)
+				t.IsPending = root.State == "PENDING"
+			}
+			out = append(out, t)
+		}
+		if !threads.PageInfo.HasNextPage {
+			break
+		}
+		cursor = threads.PageInfo.EndCursor
+	}
+	return out, nil
+}
+
+// GetPendingReview returns the viewer's unsubmitted draft review (drives review
+// resume), or a nil ReviewID when none exists. pending reviews are private to
+// their author, so reviews(states: [PENDING]) scopes to the viewer.
+func (c *Client) GetPendingReview(ctx context.Context, owner, repo string, number int) (*PendingReview, error) {
+	var page pendingReviewGQL
+	vars := map[string]any{"owner": owner, "repo": repo, "number": number}
+	if err := c.graphql(ctx, getPendingReviewQuery, vars, &page); err != nil {
+		return nil, err
+	}
+	nodes := page.Repository.PullRequest.Reviews.Nodes
+	if len(nodes) == 0 {
+		return &PendingReview{}, nil
+	}
+	r := nodes[0]
+	id := r.ID
+	out := &PendingReview{ReviewID: &id}
+	for _, cm := range r.Comments.Nodes {
+		out.Comments = append(out.Comments, PendingComment{
+			ID:        parseID(cm.FullDatabaseID),
+			Path:      cm.Path,
+			Side:      cm.DiffSide,
+			Line:      deref(cm.Line),
+			StartSide: cm.StartSide,
+			StartLine: deref(cm.StartLine),
+			Body:      cm.Body,
+		})
+	}
+	return out, nil
+}
+
+func deref(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+// parseID converts a GraphQL fullDatabaseId (a BigInt serialized as a string) to
+// its numeric form; an empty or unparseable value yields 0.
+func parseID(s string) int64 {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
+}

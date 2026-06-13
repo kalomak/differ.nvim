@@ -25,6 +25,10 @@ type Registry map[string]Handler
 type API interface {
 	ListPRs(ctx context.Context, owner, repo, filter string) ([]github.PR, error)
 	GetPR(ctx context.Context, owner, repo string, number int) (*github.PRDetail, error)
+	GetFileVersions(ctx context.Context, owner, repo string, number int, path string) (*github.FileVersions, error)
+	GetThreads(ctx context.Context, owner, repo string, number int) ([]github.Thread, error)
+	GetPendingReview(ctx context.Context, owner, repo string, number int) (*github.PendingReview, error)
+	GetChecks(ctx context.Context, owner, repo string, number int) (*github.Checks, error)
 }
 
 // Deps are the handler dependencies, injected once at construction (no globals).
@@ -36,9 +40,13 @@ type Deps struct {
 // NewRegistry wires every method to its handler.
 func NewRegistry(d Deps) Registry {
 	return Registry{
-		"hello":    d.hello,
-		"list_prs": d.listPRs,
-		"get_pr":   d.getPR,
+		"hello":              d.hello,
+		"list_prs":           d.listPRs,
+		"get_pr":             d.getPR,
+		"get_file_versions":  d.getFileVersions,
+		"get_threads":        d.getThreads,
+		"get_pending_review": d.getPendingReview,
+		"get_checks":         d.getChecks,
 	}
 }
 
