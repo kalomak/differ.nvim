@@ -229,7 +229,9 @@ function View:rerender(opts)
         self.columns[i] = nil
     end
     self:_paint_staged() -- overlay marks for staged hunks (no-op off a staging view)
-    self:_apply_folds() -- no-op until windows exist (open / relayout re-apply)
+    -- folds are a window concern, not buffer content: the callers that change the
+    -- ranges or the windows reapply them (set_context/set_source in place, _relayout
+    -- on open / layout toggle), so rerender doesn't, avoiding a double-apply
 end
 
 -- overlay the staged-hunk marks (§8.1): a muted full-line bg over every line of a
@@ -272,10 +274,11 @@ function View:_stage_offset(idx)
     return off
 end
 
--- (re)create the native folds for each column's window from its fold ranges, then
--- close them (collapsed by default). re-run on every render so a context change
--- (d= / d- / :Dipher context) just re-folds without touching buffer content. with
--- context = full the renderer returns no ranges, so everything is left open.
+-- (re)create the native folds for each column's window from its fold ranges, left
+-- open by default (the structure stays so zc/za collapse them on demand). reapplied
+-- only where the ranges or windows change: a context change (d= / d-), a file switch,
+-- a layout toggle, and open; never on scroll or redraw. with context = full the
+-- renderer returns no ranges.
 function View:_apply_folds()
     for _, col in ipairs(self.columns) do
         local win = col.winid
@@ -283,7 +286,6 @@ function View:_apply_folds()
             set_wo(win, "foldmethod", "manual")
             set_wo(win, "foldtext", FOLDTEXT_EXPR)
             set_wo(win, "foldenable", true)
-            set_wo(win, "foldlevel", 0) -- collapsed by default
             vim.api.nvim_win_call(win, function()
                 vim.cmd("silent! normal! zE") -- drop existing folds before rebuilding
                 for _, f in ipairs(col.folds or {}) do
@@ -291,6 +293,7 @@ function View:_apply_folds()
                         vim.cmd(("silent! %d,%dfold"):format(f.first, f.last))
                     end
                 end
+                vim.cmd("silent! normal! zR") -- open by default; the structure stays for zc/za
             end)
         end
     end
@@ -330,6 +333,7 @@ function View:set_source(model, staging)
     self.staging = staging
     self:_init_staged() -- a new file: reseed staged state from the fresh git read
     self:rerender({ layout = self.layout, context = self.context, deep_diff = self.deep_diff })
+    self:_apply_folds() -- new file's ranges; windows unchanged so refold in place
     self:_focus_first_hunk() -- land on the first unstaged hunk of the new file
 end
 
@@ -354,6 +358,7 @@ end
 ---@param n integer
 function View:set_context(n)
     self:rerender({ layout = self.layout, context = n, deep_diff = self.deep_diff })
+    self:_apply_folds() -- ranges shifted with the context; windows unchanged
 end
 
 -- widen/narrow context by `delta`. no-op while whole-file (can't decrement ∞)
