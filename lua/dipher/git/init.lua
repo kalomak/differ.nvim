@@ -506,10 +506,28 @@ function M.panel(opts)
     -- state (an unstaged diff opens unstaged, a staged one opens staged). the panel
     -- refreshes its counts after each op
     local stageable = is_worktree_status(source)
+
+    -- a cheap fingerprint of git state (HEAD + porcelain status). external refreshes
+    -- act only when it changed, so a stray TermLeave doesn't re-source over an
+    -- in-progress in-dipher staging session. only meaningful for the worktree source
+    local function git_signature()
+        if not stageable then
+            return ""
+        end
+        return (git({ "rev-parse", "HEAD" }, root) or "")
+            .. "\0"
+            .. (git({ "status", "--porcelain=v1", "-z", "-uall" }, root) or "")
+    end
+    local last_sig = git_signature()
+    local active_entry ---@type dipher.FileEntry|nil -- the file the view currently shows
+
     local function refresh_panel()
         if panel then
             panel:refresh()
         end
+        -- record state so the next external event doesn't read this in-dipher op as an
+        -- outside change and re-source over the in-place staged marks
+        last_sig = git_signature()
     end
     ---@param entry dipher.FileEntry
     ---@return dipher.view.Staging|nil
@@ -552,27 +570,91 @@ function M.panel(opts)
         return nil
     end
 
+    -- (re)source the diff view from an entry's current git state. false when the
+    -- entry has no diff anymore (committed / fully staged / reverted outside dipher)
+    ---@param entry dipher.FileEntry
+    ---@return boolean shown
+    local function show_entry(entry)
+        local model = model_for(entry)
+        if #model.hunks == 0 then
+            return false
+        end
+        local staging = stage_for(entry)
+        if view and view:is_open() then
+            view:set_source(model, staging)
+        else
+            view = require("dipher").diff_model(model, { staging = staging, can_stage = stageable })
+        end
+        active_entry = entry
+        return true
+    end
+
+    -- the current changed-file entries for a path: a file can have a staged side and
+    -- an unstaged side, and an external op (lazygit) can empty the side you were on
+    ---@param path string
+    ---@return dipher.FileEntry[]
+    local function entries_for_path(path)
+        local out = {}
+        for _, sec in ipairs(M.status_sections(root)) do
+            for _, e in ipairs(sec.entries) do
+                if e.path == path then
+                    out[#out + 1] = e
+                end
+            end
+        end
+        return out
+    end
+
+    -- after an external git change (lazygit, a tmux-pane commit, `:!git`): refresh the
+    -- list, then re-source the open diff so it reflects the new state too rather than
+    -- staying frozen. gated on the signature so unrelated terminal events are no-ops
+    local function refresh_external()
+        local sig = git_signature()
+        if sig == last_sig then
+            return
+        end
+        last_sig = sig
+        if panel then
+            panel:refresh()
+        end
+        if not (view and view:is_open() and active_entry) then
+            return
+        end
+        -- re-target the view to the file's current changes, preferring the side it was
+        -- on; staging the whole file empties that side, so fall back to the other one.
+        -- no candidates means the file is fully clean now, so leave the diff as-is
+        local candidates = entries_for_path(active_entry.path)
+        local pick = candidates[1]
+        for _, e in ipairs(candidates) do
+            if e.staged == active_entry.staged then
+                pick = e
+                break
+            end
+        end
+        if pick then
+            show_entry(pick)
+        end
+    end
+
     panel = Panel.new({
         sections = nonempty,
         root = vim.fn.fnamemodify(root, ":~"), -- ~-relative repo path for the header
         footer = footer_label(args, root),
         actions = actions,
+        on_external_change = refresh_external,
         keymaps = require("dipher").get_config().keymaps.panel,
         listing = opts.listing,
         position = opts.position,
         height = opts.height,
         width = opts.width,
         on_select = function(entry)
-            local model = model_for(entry)
-            local staging = stage_for(entry)
-            if view and view:is_open() then
-                view:set_source(model, staging)
-            else
-                view = require("dipher").diff_model(
-                    model,
-                    { staging = staging, can_stage = stageable }
-                )
+            if show_entry(entry) then
+                return
             end
+            -- a stale entry (committed or changed outside dipher) has an empty diff;
+            -- refresh the list rather than opening a blank view
+            refresh_panel()
+            notify(("no changes for %s"):format(entry.path))
         end,
         on_close = function()
             if view and view:is_open() then

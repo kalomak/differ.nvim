@@ -182,6 +182,49 @@ describe(":Dipher panel", function()
         p:close()
     end)
 
+    -- the panel refreshes on any of these: regaining focus, an in-nvim `:!`, or a
+    -- terminal git UI (lazygit) closing in a float (TermClose/TermLeave)
+    for _, ev in ipairs({ "FocusGained", "ShellCmdPost", "TermClose", "TermLeave" }) do
+        it("refreshes on " .. ev .. " so external git changes appear", function()
+            local root = fresh_repo()
+            write(root .. "/a.lua", "local x = 2\nreturn x\n")
+            vim.cmd.edit(root .. "/a.lua")
+
+            git_src.panel({})
+            local p = Panel.current()
+            assert.is_not_nil(file_line(p, "a.lua")) -- listed as modified
+
+            git(root, "commit", "-q", "-am", "external change") -- committed outside dipher
+            -- scoped to the panel's group so the headless harness's own TermClose
+            -- handler stays out of it
+            vim.api.nvim_exec_autocmds(ev, { group = p.augroup })
+            vim.wait(200, function() -- the refresh is scheduled, so let it run
+                return file_line(p, "a.lua") == nil
+            end)
+
+            assert.is_nil(file_line(p, "a.lua")) -- the panel picked up the clean state
+            p:close()
+        end)
+    end
+
+    it("guards a stale entry: selecting a now-clean file refreshes, no blank view", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({})
+        local p = Panel.current()
+        local origin_buf = vim.api.nvim_win_get_buf(p.origin_win)
+        git(root, "checkout", "HEAD", "--", "a.lua") -- revert outside dipher → stale entry
+
+        vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "a.lua"), 0 })
+        p:select()
+        -- no diff opened: the origin window still shows its original buffer
+        assert.are.equal(origin_buf, vim.api.nvim_win_get_buf(p.origin_win))
+        assert.is_nil(file_line(p, "a.lua")) -- and the stale entry is gone after refresh
+        p:close()
+    end)
+
     it("diffs a staged entry HEAD↔index and an unstaged entry index↔worktree", function()
         local root = fresh_repo()
         -- stage one version of a.lua, then edit further in the worktree
@@ -466,6 +509,52 @@ describe(":Dipher diff hunk staging (§8.1)", function()
         )
             :wait().stdout
         assert.are.equal("?? new.lua\n", porc)
+        p:close()
+    end)
+
+    it("re-sources the open diff on an external change, not just the panel list", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- a.lua modified
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.are.equal("local x = 2\nreturn x\n", v.model.new_text)
+
+        -- outside dipher: edit the viewed file further, and change git state (stage a
+        -- second file) so the signature moves and the refresh fires
+        write(root .. "/a.lua", "local x = 99\nreturn x\n")
+        write(root .. "/b.lua", "new\n")
+        git(root, "add", "b.lua")
+        vim.api.nvim_exec_autocmds("FocusGained", { group = p.augroup })
+        vim.wait(200, function()
+            return v.model.new_text == "local x = 99\nreturn x\n"
+        end)
+
+        assert.are.equal("local x = 99\nreturn x\n", v.model.new_text) -- diff re-sourced
+        p:close()
+    end)
+
+    it("follows a file to its staged side when staged wholesale outside dipher", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- a.lua modified, unstaged
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+        assert.are.equal("unstaged", v.staging.initial) -- viewing the unstaged side
+
+        git(root, "add", "a.lua") -- stage the whole file in "lazygit"
+        vim.api.nvim_exec_autocmds("FocusGained", { group = p.augroup })
+        vim.wait(200, function()
+            return v.staging.initial == "staged"
+        end)
+
+        -- the diff followed the file to its staged side rather than going blank
+        assert.are.equal("staged", v.staging.initial)
+        assert.are.equal("local x = 2\nreturn x\n", v.model.new_text) -- HEAD↔index
         p:close()
     end)
 

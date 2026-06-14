@@ -67,6 +67,7 @@ local STATUS_HL = {
 ---@field collapsed table<string, boolean>
 ---@field on_select fun(entry: dipher.FileEntry)
 ---@field on_close fun()|nil
+---@field on_external_change fun()|nil
 ---@field root string|nil
 ---@field footer string|nil
 ---@field actions dipher.panel.Actions|nil
@@ -77,6 +78,7 @@ local STATUS_HL = {
 ---@field width integer
 ---@field lines string[]
 ---@field meta dipher.panel.LineMeta[]
+---@field augroup integer|nil  -- autocmd group for the external-change refresh
 local Panel = {}
 Panel.__index = Panel
 
@@ -84,6 +86,7 @@ Panel.__index = Panel
 ---@field sections dipher.panel.Section[]
 ---@field on_select fun(entry: dipher.FileEntry)
 ---@field on_close? fun()  -- runs on :close (e.g. tear down the driven view)
+---@field on_external_change? fun() -- re-source list + diff after an outside git change
 ---@field root? string  -- repo/worktree path shown in the panel header
 ---@field footer? string -- rev spec shown under "Showing changes for:"
 ---@field actions? dipher.panel.Actions -- file-level staging hooks (§8.6 slice C)
@@ -117,6 +120,7 @@ function Panel.new(opts)
         sections = opts.sections,
         on_select = opts.on_select,
         on_close = opts.on_close,
+        on_external_change = opts.on_external_change,
         root = opts.root,
         footer = opts.footer,
         actions = opts.actions,
@@ -554,8 +558,41 @@ function Panel:open()
     self:_open_window()
     self:render()
     vim.api.nvim_win_set_cursor(self.winid, { self:_first_file_line(), 0 })
+    self:_watch_external_changes()
     current = self
     return self
+end
+
+-- refresh when git state may have changed outside dipher, without a manual R.
+-- FocusGained: back from another app / tmux pane. ShellCmdPost: an in-nvim `:!git`.
+-- TermClose / TermLeave: a terminal UI like lazygit run in a float, which never
+-- drops nvim's own OS focus so FocusGained doesn't fire. the refresh is scheduled so
+-- it runs once the terminal window has finished tearing down. only worktree-status
+-- panels reload; rev-pair lists don't track the worktree. FocusGained needs
+-- `focus-events on` under tmux
+function Panel:_watch_external_changes()
+    if not self.actions then
+        return
+    end
+    self.augroup = vim.api.nvim_create_augroup("dipher.panel." .. self.bufnr, { clear = true })
+    vim.api.nvim_create_autocmd({ "FocusGained", "ShellCmdPost", "TermClose", "TermLeave" }, {
+        group = self.augroup,
+        desc = "dipher: refresh the panel when git state changed externally",
+        callback = function()
+            vim.schedule(function()
+                if not self:is_open() then
+                    return
+                end
+                -- on_external_change re-sources the diff too; refresh() is the list-only
+                -- fallback for a panel without the hook
+                if self.on_external_change then
+                    self.on_external_change()
+                else
+                    self:refresh()
+                end
+            end)
+        end,
+    })
 end
 
 ---@return boolean
@@ -616,6 +653,10 @@ end
 -- diff view the panel drives, so closing the panel ends the whole dipher session
 function Panel:close()
     self:_close_window()
+    if self.augroup then
+        pcall(vim.api.nvim_del_augroup_by_id, self.augroup)
+        self.augroup = nil
+    end
     if vim.api.nvim_buf_is_valid(self.bufnr) then
         vim.api.nvim_buf_delete(self.bufnr, { force = true })
     end
