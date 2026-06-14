@@ -151,6 +151,22 @@ function Panel:_first_file_line()
     return 1
 end
 
+-- move the cursor to `path`'s file row if it's currently rendered, returning whether
+-- it was found; lets :Dipher open on the current file rather than the first
+---@param path string -- repo-relative
+---@return boolean
+function Panel:focus_file(path)
+    for i, m in ipairs(self.meta) do
+        if m.kind == "file" and m.entry.path == path then
+            if self:is_open() then
+                pcall(vim.api.nvim_win_set_cursor, self.winid, { i, 0 })
+            end
+            return true
+        end
+    end
+    return false
+end
+
 -- re-flatten the sections (honouring listing + fold state) and repaint the
 -- buffer. cursor line is preserved across re-renders (clamped)
 function Panel:render()
@@ -377,24 +393,40 @@ function Panel:discard()
     end
 end
 
--- ]f / [f: move to the next/prev file row and open it (lockstep file stepping).
--- `keep_focus` is threaded to `_open` so in-view stepping stays in the diff window
+-- the next/prev file row from `lnum`, wrapping past the ends so file stepping is
+-- cyclic (you often open mid-list); nil only when there are no file rows at all
+---@param lnum integer
+---@param direction "next"|"prev"
+---@return integer|nil
+function Panel:_file_row(lnum, direction)
+    local n = #self.meta
+    if n == 0 then
+        return nil
+    end
+    local step = direction == "prev" and -1 or 1
+    for k = 1, n do
+        local i = ((lnum - 1 + step * k) % n) + 1
+        local m = self.meta[i]
+        if m and m.kind == "file" then
+            return i
+        end
+    end
+    return nil
+end
+
+-- ]f / [f: move to the next/prev file row and open it (lockstep file stepping),
+-- wrapping at the ends. `keep_focus` is threaded to `_open` so in-view stepping
+-- stays in the diff window
 ---@param direction "next"|"prev"
 ---@param keep_focus boolean|nil
 function Panel:goto_file(direction, keep_focus)
     local lnum = vim.api.nvim_win_get_cursor(self.winid)[1]
-    local from, to, step = lnum + 1, #self.meta, 1
-    if direction == "prev" then
-        from, to, step = lnum - 1, 1, -1
+    local i = self:_file_row(lnum, direction)
+    if not i then
+        return
     end
-    for i = from, to, step do
-        local m = self.meta[i]
-        if m and m.kind == "file" then
-            vim.api.nvim_win_set_cursor(self.winid, { i, 0 })
-            self:_open(m.entry, keep_focus)
-            return
-        end
-    end
+    vim.api.nvim_win_set_cursor(self.winid, { i, 0 })
+    self:_open(self.meta[i].entry, keep_focus)
 end
 
 -- scroll the *diff view* a quarter page (the origin window, where the file renders),

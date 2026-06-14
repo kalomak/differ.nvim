@@ -515,6 +515,40 @@ function View:_focus_first_hunk()
     end
 end
 
+-- snap to the hunk at or nearest the cursor's new-side line (`new_lnum`, where the
+-- cursor was when dipher opened), landing on that hunk's start so you open on the
+-- change you were near rather than always the first hunk
+---@param new_lnum integer
+function View:focus_new_line(new_lnum)
+    local col = self.columns[#self.columns] -- the new side: the unified col, or right in split
+    if not (col and col.winid and vim.api.nvim_win_is_valid(col.winid)) then
+        return
+    end
+    local hunks = self.model.hunks
+    if #hunks == 0 then
+        return
+    end
+    local best, best_dist = 1, nil
+    for idx, h in ipairs(hunks) do
+        local lo, hi = h.new_start, h.new_start + math.max(h.new_count, 1) - 1
+        local dist = 0
+        if new_lnum < lo then
+            dist = lo - new_lnum
+        elseif new_lnum > hi then
+            dist = new_lnum - hi
+        end
+        if not best_dist or dist < best_dist then
+            best, best_dist = idx, dist
+        end
+    end
+    for i, line in ipairs(col.map.lines) do
+        if line.hunk == best then
+            pcall(vim.api.nvim_win_set_cursor, col.winid, { i, 0 })
+            return
+        end
+    end
+end
+
 -- the buffer line of the last hunk's start, where the backward review flow lands
 -- when stepping into a previous file (so u keeps moving backward through it)
 ---@param col dipher.ViewColumn

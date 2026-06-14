@@ -551,6 +551,30 @@ describe(":Dipher diff hunk staging (§8.1)", function()
         p:close()
     end)
 
+    it("opens on the current file, snapping to the hunk nearest the cursor", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+        git(root, "commit", "-q", "-am", "ten lines")
+        write(root .. "/a.lua", "1x\n2\n3\n4\n5\n6\n7\n8\n9\n10x\n") -- hunks at lines 1 and 10
+        write(root .. "/m.lua", "new\n")
+        git(root, "add", "m.lua") -- a staged file that sorts ahead of a.lua
+
+        vim.cmd.edit(root .. "/a.lua")
+        vim.api.nvim_win_set_cursor(0, { 10, 0 }) -- near the second hunk
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local v = view_in_origin(p)
+
+        -- opened a.lua (the current file) though m.lua sorts first in the list
+        assert.are.equal("1x\n2\n3\n4\n5\n6\n7\n8\n9\n10x\n", v.model.new_text)
+        -- and snapped to the second hunk (nearest the cursor), not the first
+        local col = v.columns[#v.columns]
+        local row = vim.api.nvim_win_get_cursor(col.winid)[1]
+        assert.are.equal(2, col.map.lines[row].hunk)
+        p:close()
+    end)
+
     it("re-sources on a worktree-only edit (no status change) via the signature", function()
         local root = fresh_repo()
         write(root .. "/a.lua", "local x = 2\nreturn x\n") -- a.lua modified
@@ -902,6 +926,26 @@ describe(":Dipher (open_first)", function()
         assert.are.equal(p.origin_win, vim.api.nvim_get_current_win())
         -- and the one view re-sourced to a different file
         assert.are_not.equal(first, require("dipher.view").current().model.path)
+        p:close()
+    end)
+
+    it("]f / [f wrap past the ends of the file list", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n") -- unstaged (sorts last)
+        write(root .. "/z.lua", "local z = 9\n")
+        git(root, "add", "z.lua") -- staged (sorts first)
+        vim.cmd.edit(root .. "/a.lua") -- open on a.lua, the last file
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        vim.api.nvim_set_current_win(p.origin_win)
+        local v = require("dipher.view").current()
+        assert.are.equal("a.lua", v.model.path)
+
+        v:step_file("next") -- ]f past the last file wraps to the first
+        assert.are.equal("z.lua", require("dipher.view").current().model.path)
+        v:step_file("prev") -- [f past the first wraps back to the last
+        assert.are.equal("a.lua", require("dipher.view").current().model.path)
         p:close()
     end)
 

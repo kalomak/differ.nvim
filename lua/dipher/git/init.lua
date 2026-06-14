@@ -431,9 +431,23 @@ function M.panel(opts)
         return nil
     end
 
+    -- the file + line :Dipher was invoked from, so open_first can open that file at
+    -- that line (mapped into the diff) instead of the first listed file
+    local origin_file = vim.api.nvim_buf_get_name(0)
+    local origin_line = vim.api.nvim_win_get_cursor(0)[1]
+
     local root = repo_root()
     if not root then
         return notify("not inside a git repository", vim.log.levels.WARN)
+    end
+    -- repo-relative origin path; resolve symlinks so the prefix strip lines up with
+    -- git's realpath toplevel (as M.history does), and only when the file is under it
+    local origin_rel ---@type string|nil
+    if origin_file ~= "" and vim.fn.filereadable(origin_file) == 1 then
+        local resolved = vim.fn.resolve(origin_file)
+        if resolved:sub(1, #root + 1) == root .. "/" then
+            origin_rel = resolved:sub(#root + 2)
+        end
     end
     -- normalise the rev spec to an arg list (explicit branches so the type narrows)
     local args ---@type string[]
@@ -696,9 +710,13 @@ function M.panel(opts)
         end,
     }):open()
     if opts.open_first then
-        -- open the first file's diff and leave the cursor in it (not the panel), so
-        -- :Dipher drops you straight into reviewing
+        -- land on the file (and line) :Dipher was run from when it's in the change
+        -- set, else the first file; leave the cursor in the diff, not the panel
+        local on_origin = origin_rel and panel:focus_file(origin_rel)
         panel:select(true)
+        if on_origin and view then
+            view:focus_new_line(origin_line)
+        end
     end
     return panel
 end
