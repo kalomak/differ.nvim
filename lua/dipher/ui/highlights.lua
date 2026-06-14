@@ -1,19 +1,17 @@
 -- highlight group definitions for diff lines, word-level spans, threads, and the
--- file panel. structural groups are plain links; the panel's status + count groups
--- carry a semantic palette (green add / yellow modify / blue rename / orange
--- conflict / red delete) derived from the active theme with hex fallbacks, mirroring
--- the user's diffview/octo colours. all are set with `default = true` so explicit
--- user overrides win, and re-applied on `ColorScheme` so theme switches propagate
+-- file panel. structural groups are plain links; the diff line + word backgrounds
+-- and the panel's status + count groups carry a semantic palette (green add / yellow
+-- modify / blue rename / orange conflict / red delete) derived from the active theme
+-- with hex fallbacks, mirroring the user's diffview/octo colours. the line + word
+-- backgrounds are a coherent two-tone pair from one colour per side (see
+-- diff_bg_groups). all are set with `default = true` so explicit user overrides win,
+-- and re-applied on `ColorScheme` so theme switches propagate
 
 local M = {}
 
 -- static links: body diff layers and structural panel chrome
 ---@type table<string, vim.api.keyset.highlight>
 local LINKS = {
-    dipherLineDelete = { link = "DiffDelete" },
-    dipherLineAdd = { link = "DiffAdd" },
-    dipherWordDelete = { link = "DiffText", bold = true },
-    dipherWordAdd = { link = "DiffText", bold = true },
     dipherThreadRange = { link = "Visual" },
     -- staged-hunk overlay (§8.1): a muted full-line bg replacing the vivid
     -- add/delete so a staged hunk reads as set-aside rather than a live change
@@ -46,6 +44,35 @@ local function fg_of(groups, fallback)
         end
     end
     return fallback
+end
+
+-- the first defined bg among `groups`, else `fallback` (a 0xRRGGBB int)
+---@param groups string[]
+---@param fallback integer
+---@return integer
+local function bg_of(groups, fallback)
+    for _, name in ipairs(groups) do
+        local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
+        if ok and hl and hl.bg then
+            return hl.bg
+        end
+    end
+    return fallback
+end
+
+-- mix `top` over `base` by `alpha` (0..1); both 0xRRGGBB ints, arithmetic only so
+-- there's no bit-op dependency
+---@param top integer
+---@param base integer
+---@param alpha number
+---@return integer
+local function blend(top, base, alpha)
+    local function chan(shift)
+        local t = math.floor(top / shift) % 256
+        local b = math.floor(base / shift) % 256
+        return math.floor(b + (t - b) * alpha + 0.5) % 256
+    end
+    return chan(65536) * 65536 + chan(256) * 256 + chan(1)
 end
 
 -- semantic status palette, resolved against the current theme. GitSigns groups
@@ -83,11 +110,33 @@ local function status_groups(p)
     }
 end
 
+-- coherent two-tone diff backgrounds: a quiet line tint and a richer same-hue word
+-- patch, both blended from one vivid colour per side (the add/delete fg) over the
+-- editor bg. deriving line and patch from the same source keeps the hue identical
+-- and steps only saturation/lightness, so the changed words read as a deeper block
+-- of the line they sit on (the claude-style look) instead of a clashing overlay.
+-- the vivid fg is a mid-tone, so the same alpha lightens on dark themes and darkens
+-- on light ones, no per-theme branching. word spans are bg-only (no fg/bold) so the
+-- syntax foreground shows through. these replace the old DiffAdd/DiffDelete links
+---@param p table<string, integer>
+---@return table<string, vim.api.keyset.highlight>
+local function diff_bg_groups(p)
+    local base = bg_of({ "Normal" }, 0x14161b)
+    local line, word = 0.16, 0.42 -- blend weights toward the vivid colour; tune to taste
+    return {
+        dipherLineAdd = { bg = blend(p.green, base, line) },
+        dipherLineDelete = { bg = blend(p.red, base, line) },
+        dipherWordAdd = { bg = blend(p.green, base, word) },
+        dipherWordDelete = { bg = blend(p.red, base, word) },
+    }
+end
+
 -- (re)define all default highlight groups. `default = true` keeps user overrides
 -- authoritative; the ColorScheme autocmd (registered once by setup) re-resolves the
 -- palette so it tracks theme changes
 local function apply()
-    local groups = vim.tbl_extend("error", {}, LINKS, status_groups(palette()))
+    local p = palette()
+    local groups = vim.tbl_extend("error", {}, LINKS, status_groups(p), diff_bg_groups(p))
     for name, val in pairs(groups) do
         vim.api.nvim_set_hl(0, name, vim.tbl_extend("keep", { default = true }, val))
     end

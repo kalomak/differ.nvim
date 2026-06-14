@@ -34,7 +34,7 @@ M.defaults = {
     diff_counter = true, -- "hunk K/N" counter in the diff window's winbar
     deep_diff = {
         enabled = true,
-        granularity = "char",
+        granularity = "word",
         similarity_threshold = 0.5,
     },
     comments = {

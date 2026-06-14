@@ -10,15 +10,16 @@ local function model(old, new)
     return diff.build({ path = "x", old_rev = "A", new_rev = "B", old_text = old, new_text = new })
 end
 
--- collect line_hl_group per 0-based row and word hl_group spans from the namespace
+-- collect line fills per 0-based row and word hl_group spans from the namespace.
+-- the line bg is a char-level full-line fill (hl_eol) rather than a line_hl_group,
+-- so it wins/loses against the word spans by priority; classify it by hl_eol
 local function extmarks(bufnr)
     local line_hl, word = {}, {}
     for _, m in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })) do
         local row, d = m[2], m[4]
-        if d.line_hl_group then
-            line_hl[row] = d.line_hl_group
-        end
-        if d.hl_group then
+        if d.hl_eol then
+            line_hl[row] = d.hl_group
+        elseif d.hl_group then
             word[#word + 1] = { row = row, col = m[3], end_col = d.end_col, hl = d.hl_group }
         end
     end

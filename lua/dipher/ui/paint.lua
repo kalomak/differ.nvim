@@ -20,8 +20,14 @@ function M.apply(bufnr, ns, column)
         local row = i - 1
         local line_hl = LINE_HL[line.kind]
         if line_hl then
+            -- char-level full-line fill, not line_hl_group: a line_hl_group bg wins
+            -- over a character hl_group bg regardless of priority, which buries the
+            -- word spans. hl_eol extends the fill past EOL so it still spans the row
             vim.api.nvim_buf_set_extmark(bufnr, ns, row, 0, {
-                line_hl_group = line_hl,
+                end_row = row + 1,
+                end_col = 0,
+                hl_group = line_hl,
+                hl_eol = true,
                 priority = 100,
             })
         end
