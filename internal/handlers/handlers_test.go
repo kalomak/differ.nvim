@@ -27,6 +27,7 @@ type mockAPI struct {
 	gotResolved bool
 	gotViewed   bool
 	gotMethod   string
+	gotState    string
 	called      bool
 }
 
@@ -117,6 +118,13 @@ func (m *mockAPI) MergePR(_ context.Context, _, _ string, number int, method str
 	m.gotNumber = number
 	m.gotMethod = method
 	return &github.Merge{Merged: true, SHA: "sha"}, nil
+}
+
+func (m *mockAPI) SetPRState(_ context.Context, _, _ string, number int, state string) (*github.SetPRState, error) {
+	m.called = true
+	m.gotNumber = number
+	m.gotState = state
+	return &github.SetPRState{State: state}, nil
 }
 
 func deps(m *mockAPI) Deps {
@@ -398,6 +406,33 @@ func TestMergePRRejectsBadMethod(t *testing.T) {
 	wantBadRequest(t, err)
 	if m.called {
 		t.Error("GH must not be called for an unknown merge method")
+	}
+}
+
+func TestSetPRStateRoutes(t *testing.T) {
+	for _, state := range []string{"ready", "draft", "closed", "open"} {
+		t.Run(state, func(t *testing.T) {
+			m := &mockAPI{}
+			res, err := deps(m).setPRState(context.Background(), json.RawMessage(`{"owner":"o","repo":"r","number":3,"state":"`+state+`"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.gotState != state {
+				t.Errorf("state not forwarded: %q", m.gotState)
+			}
+			if res.(*github.SetPRState).State != state {
+				t.Errorf("result not forwarded: %+v", res)
+			}
+		})
+	}
+}
+
+func TestSetPRStateRejectsUnknown(t *testing.T) {
+	m := &mockAPI{}
+	_, err := deps(m).setPRState(context.Background(), json.RawMessage(`{"owner":"o","repo":"r","number":3,"state":"frozen"}`))
+	wantBadRequest(t, err)
+	if m.called {
+		t.Error("GH must not be called for an unknown state")
 	}
 }
 

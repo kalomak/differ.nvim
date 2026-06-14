@@ -154,6 +154,12 @@ type Merge struct {
 	SHA    string `json:"sha,omitempty"`
 }
 
+// SetPRState is the set_pr_state result: the PR's condition after the transition,
+// normalised to open / draft / closed / merged.
+type SetPRState struct {
+	State string `json:"state"`
+}
+
 // StartReview is the start_review result: the pending review's node id (a fresh
 // one, or the viewer's existing draft when start_review is replayed).
 type StartReview struct {

@@ -135,3 +135,25 @@ const deleteRefMutation = `
 mutation DeleteRef($refId: ID!) {
   deleteRef(input: {refId: $refId}) { clientMutationId }
 }`
+
+// the set_pr_state lifecycle mutations. each is keyed by the PR node id and aliases
+// its mutation field to result so they share one response shape; the resulting
+// state/isDraft is read back and normalised.
+const (
+	readyForReviewMutation = `
+mutation Ready($prId: ID!) {
+  result: markPullRequestReadyForReview(input: {pullRequestId: $prId}) { pullRequest { state isDraft } }
+}`
+	convertToDraftMutation = `
+mutation Draft($prId: ID!) {
+  result: convertPullRequestToDraft(input: {pullRequestId: $prId}) { pullRequest { state isDraft } }
+}`
+	closePRMutation = `
+mutation Close($prId: ID!) {
+  result: closePullRequest(input: {pullRequestId: $prId}) { pullRequest { state isDraft } }
+}`
+	reopenPRMutation = `
+mutation Reopen($prId: ID!) {
+  result: reopenPullRequest(input: {pullRequestId: $prId}) { pullRequest { state isDraft } }
+}`
+)

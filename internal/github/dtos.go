@@ -282,3 +282,14 @@ type mergePRGQL struct {
 		} `json:"pullRequest"`
 	} `json:"mergePullRequest"`
 }
+
+// setPRStateGQL is the shared response shape for the lifecycle mutations (the field
+// is aliased to result); state/isDraft normalise to the returned condition.
+type setPRStateGQL struct {
+	Result struct {
+		PullRequest struct {
+			State   string `json:"state"`
+			IsDraft bool   `json:"isDraft"`
+		} `json:"pullRequest"`
+	} `json:"result"`
+}

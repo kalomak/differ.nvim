@@ -66,3 +66,32 @@ func mergeMethod(m string) (string, bool) {
 		return "", false
 	}
 }
+
+type setPRStateParams struct {
+	prParams
+	State string `json:"state"`
+}
+
+// setPRState transitions the PR lifecycle: ready / draft / closed / open (§7.3).
+func (d Deps) setPRState(ctx context.Context, params json.RawMessage) (any, error) {
+	var p setPRStateParams
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if err := requirePR(p.Owner, p.Repo, p.Number); err != nil {
+		return nil, err
+	}
+	if !validPRState(p.State) {
+		return nil, protocol.NewError(protocol.CodeBadRequest, "state must be ready, draft, closed, or open")
+	}
+	return d.GH.SetPRState(ctx, p.Owner, p.Repo, p.Number, p.State)
+}
+
+func validPRState(state string) bool {
+	switch state {
+	case "ready", "draft", "closed", "open":
+		return true
+	default:
+		return false
+	}
+}
