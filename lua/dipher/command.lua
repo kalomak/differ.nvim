@@ -49,10 +49,29 @@ function M.context(arg)
     end
 end
 
+---@type table<string, true>
+local PANEL_POSITIONS = { left = true, right = true, top = true, bottom = true }
+
 -- :Dipher panel [revspec], open/toggle the file panel (§8.6) over a change set,
--- without auto-selecting a file (bare `:Dipher` is the open-and-show entry)
+-- without auto-selecting a file (bare `:Dipher` is the open-and-show entry).
+-- `:Dipher panel set <left|right|top|bottom>` repositions a live panel, or opens
+-- one at that position when none is open; height/width carry over from config
 ---@param arg string|nil
-function M.panel(arg)
+---@param pos string|nil  -- the position, for the `set` form
+function M.panel(arg, pos)
+    if arg == "set" then
+        if not PANEL_POSITIONS[pos] then
+            return notify(
+                "panel set: expected 'left', 'right', 'top' or 'bottom'",
+                vim.log.levels.ERROR
+            )
+        end
+        local panel = require("dipher.panel").current()
+        if panel then
+            return panel:set_position(pos)
+        end
+        return require("dipher.git").panel({ position = pos })
+    end
     require("dipher.git").panel({ rev = (arg ~= "" and arg) or nil })
 end
 
@@ -95,23 +114,33 @@ local SUB = {
 function M.dispatch(fargs)
     local handler = fargs[1] and SUB[fargs[1]]
     if handler then
-        return handler(fargs[2])
+        return handler(fargs[2], fargs[3])
     end
     require("dipher.git").panel({ rev = fargs, open_first = true })
 end
 
 ---@type table<string, string[]>
-local VALUES = { layout = { "stacked", "split" }, context = { "full", "+", "-" } }
+local VALUES =
+    { layout = { "stacked", "split" }, context = { "full", "+", "-" }, panel = { "set" } }
+-- the nested value set for `:Dipher panel set <pos>`
+local PANEL_SET_VALUES = { "left", "right", "top", "bottom" }
 
--- completion: subcommands at position 1, then that subcommand's value set
+-- completion: subcommands at position 1, then that subcommand's value set, plus the
+-- one nested case `:Dipher panel set <pos>`
 ---@param arglead string
 ---@param cmdline string
 ---@return string[]
 function M.complete(arglead, cmdline)
     local parts = vim.split(vim.trim(cmdline), "%s+")
     -- parts[1] == "Dipher"; completing the subcommand while on parts[2]
-    local completing_sub = #parts < 2 or (#parts == 2 and arglead ~= "")
-    local pool = completing_sub and vim.tbl_keys(SUB) or (VALUES[parts[2]] or {})
+    local pool
+    if parts[2] == "panel" and parts[3] == "set" then
+        pool = PANEL_SET_VALUES
+    elseif #parts < 2 or (#parts == 2 and arglead ~= "") then
+        pool = vim.tbl_keys(SUB)
+    else
+        pool = VALUES[parts[2]] or {}
+    end
     return vim.tbl_filter(function(c)
         return c:find(arglead, 1, true) == 1
     end, pool)

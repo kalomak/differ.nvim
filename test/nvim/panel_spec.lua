@@ -71,15 +71,68 @@ describe("panel navigation", function()
     end)
 end)
 
+-- the panel window's position relative to the origin window it was split from
+local function geom(p)
+    local prow, pcol = unpack(vim.api.nvim_win_get_position(p.winid))
+    local orow, ocol = unpack(vim.api.nvim_win_get_position(p.origin_win))
+    return { prow = prow, pcol = pcol, orow = orow, ocol = ocol }
+end
+
+-- per position: which fixed-size flag the split carries, and which edge the panel
+-- sits on (left/right compare columns, top/bottom compare rows against the origin)
+local PLACEMENT = {
+    left = {
+        axis = "winfixwidth",
+        cmp = function(g)
+            return g.pcol < g.ocol
+        end,
+    },
+    right = {
+        axis = "winfixwidth",
+        cmp = function(g)
+            return g.pcol > g.ocol
+        end,
+    },
+    top = {
+        axis = "winfixheight",
+        cmp = function(g)
+            return g.prow < g.orow
+        end,
+    },
+    bottom = {
+        axis = "winfixheight",
+        cmp = function(g)
+            return g.prow > g.orow
+        end,
+    },
+}
+
 describe("panel runtime position", function()
-    it("re-positions live, keeping the panel open and its buffer", function()
+    for _, pos in ipairs({ "left", "right", "top", "bottom" }) do
+        it("opens on the " .. pos .. " edge with the right fixed-size flag", function()
+            local p = panel({ fe("a.lua") }, { position = pos })
+            p:open()
+            local spec = PLACEMENT[pos]
+            assert.is_true(vim.wo[p.winid][spec.axis])
+            assert.is_true(spec.cmp(geom(p)), "wrong edge for " .. pos)
+            p:close()
+        end)
+    end
+
+    it("re-positions live through every edge, keeping one panel + buffer", function()
         local p = panel({ fe("a.lua") })
         p:open()
         local buf, win = p.bufnr, p.winid
-        p:set_position("left")
-        assert.is_true(p:is_open())
-        assert.are.equal(buf, p.bufnr) -- same buffer, just re-windowed
-        assert.is_false(win == p.winid) -- new window
+        for _, pos in ipairs({ "left", "top", "right", "bottom" }) do
+            p:set_position(pos)
+            local spec = PLACEMENT[pos]
+            assert.is_true(p:is_open(), pos)
+            assert.are.equal(buf, p.bufnr) -- same buffer, just re-windowed
+            assert.is_false(win == p.winid) -- new window each move
+            assert.is_true(vim.wo[p.winid][spec.axis])
+            assert.is_true(spec.cmp(geom(p)), "wrong edge for " .. pos)
+            win = p.winid
+        end
         p:close()
     end)
 

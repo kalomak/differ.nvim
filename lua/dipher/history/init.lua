@@ -41,6 +41,7 @@ local current = nil
 ---@field bufnr integer
 ---@field winid integer|nil
 ---@field origin_win integer|nil
+---@field return_tab integer|nil
 ---@field commits dipher.git.Commit[]
 ---@field mode "file"|"range"
 ---@field index integer            -- selected commit

@@ -62,6 +62,8 @@ local STATUS_HL = {
 ---@field bufnr integer
 ---@field winid integer|nil
 ---@field origin_win integer|nil
+---@field return_tab integer|nil
+---@field progress boolean  -- file-position meter in the panel winbar
 ---@field sections dipher.panel.Section[]
 ---@field listing "tree"|"flat"
 ---@field collapsed table<string, boolean>
@@ -96,6 +98,7 @@ Panel.__index = Panel
 ---@field position? "bottom"|"top"|"left"|"right"
 ---@field height? integer
 ---@field width? integer
+---@field progress? boolean -- file-position meter in the panel winbar (default on)
 
 -- build a panel (buffer only; the window is created on :open, so it's headless-
 -- constructible for tests)
@@ -132,8 +135,9 @@ function Panel.new(opts)
         icon_for = opts.icons ~= false and devicon_provider() or nil,
         listing = opts.listing or "tree",
         position = opts.position or "bottom",
-        height = opts.height or 10,
+        height = opts.height or 7,
         width = opts.width or 35,
+        progress = opts.progress ~= false, -- default on; only an explicit false disables it
         collapsed = {},
         lines = {},
         meta = {},
@@ -515,6 +519,10 @@ function Panel:_setup_window()
     set_wo(win, "foldcolumn", "0")
     set_wo(win, "wrap", false)
     set_wo(win, "cursorline", true)
+    if self.progress then
+        -- a `%!` expression so the file-position meter tracks the cursor on each redraw
+        set_wo(win, "winbar", '%!v:lua.require("dipher.ui.winbar").panel()')
+    end
     if self.position == "left" or self.position == "right" then
         set_wo(win, "winfixwidth", true)
     else

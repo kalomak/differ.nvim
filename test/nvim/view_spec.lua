@@ -39,12 +39,24 @@ describe("view stacked", function()
 
         local win = v.columns[1].winid
         assert.is_false(vim.wo[win].number)
-        assert.is_false(vim.wo[win].wrap)
+        assert.is_true(vim.wo[win].wrap) -- wrap defaults on
 
         local line_hl = extmarks(buf)
         assert.are.equal("dipherLineDelete", line_hl[1]) -- "b" (old)
         assert.are.equal("dipherLineAdd", line_hl[2]) -- "B" (new)
         assert.is_nil(line_hl[0]) -- "a" (context) unhighlighted
+        v:close()
+    end)
+
+    it("honours wrap = false, disabling soft-wrap in the diff window", function()
+        local v = View.new(model("a\nb\n", "a\nB\n"), {
+            layout = "stacked",
+            context = math.huge,
+            wrap = false,
+            deep_diff = { enabled = true },
+        })
+        v:open()
+        assert.is_false(vim.wo[v.columns[1].winid].wrap)
         v:close()
     end)
 
@@ -138,6 +150,22 @@ describe("view hunk navigation", function()
         assert.are.equal(9, vim.api.nvim_win_get_cursor(win)[1]) -- last hunk, no panel to step into
         v:goto_hunk("prev")
         assert.are.equal(2, vim.api.nvim_win_get_cursor(win)[1])
+        v:close()
+    end)
+
+    it("the diff winbar reports the file and the hunk under the cursor", function()
+        local v = two_hunk_view()
+        v:open()
+        local win = v.columns[1].winid
+        local winbar = require("dipher.ui.winbar")
+        vim.g.statusline_winid = win
+        vim.api.nvim_win_set_cursor(win, { 2, 0 }) -- first hunk
+        local s = winbar.diff()
+        assert.is_truthy(s:find("x", 1, true)) -- the file basename
+        assert.is_truthy(s:find("hunk 1/2", 1, true))
+        vim.api.nvim_win_set_cursor(win, { 9, 0 }) -- second hunk
+        assert.is_truthy(winbar.diff():find("hunk 2/2", 1, true))
+        vim.g.statusline_winid = nil
         v:close()
     end)
 

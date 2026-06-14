@@ -1,10 +1,20 @@
 -- plugin options: defaults, user merge, and shallow validation
 
+---@class dipher.Config.Panel
+---@field position "bottom"|"top"|"left"|"right"
+---@field height integer  -- used for top/bottom
+---@field width integer   -- used for left/right
+---@field listing "tree"|"flat"
+---@field progress boolean  -- file-position meter in the panel winbar
+
 ---@class dipher.Config
 ---@field layout dipher.Layout
 ---@field context integer
+---@field wrap boolean
+---@field diff_counter boolean
 ---@field deep_diff { enabled: boolean, granularity: "word"|"char", similarity_threshold: number }
 ---@field comments { inline: boolean, collapsed: boolean }
+---@field panel dipher.Config.Panel
 ---@field keymaps table<string, string|string[]|false|table>
 ---@field relative_dates boolean
 ---@field sidecar_bin string|nil
@@ -20,14 +30,25 @@ local SURFACE_SET = { diff = true, panel = true, history = true }
 M.defaults = {
     layout = "stacked",
     context = 10, -- generous default; tight context makes diffs hard to read
+    wrap = true, -- soft-wrap long lines in the diff view
+    diff_counter = true, -- "hunk K/N" counter in the diff window's winbar
     deep_diff = {
         enabled = true,
-        granularity = "word",
+        granularity = "char",
         similarity_threshold = 0.5,
     },
     comments = {
         inline = true,
         collapsed = false,
+    },
+    -- the file panel's default placement and size; `:Dipher panel` opts (and the
+    -- runtime Panel.current() setters) still override these per-session
+    panel = {
+        position = "right",
+        height = 9, -- top/bottom
+        width = 35, -- left/right
+        listing = "tree",
+        progress = true, -- "file K/N" position meter in the panel winbar
     },
     -- buffer-local maps, one flat table of action -> lhs shared across the diff,
     -- panel and history surfaces (each binds the actions it implements). a value is

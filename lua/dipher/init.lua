@@ -43,6 +43,8 @@ function M.diff_model(model, opts)
         .new(model, {
             layout = opts.layout or cfg.layout,
             context = opts.context or cfg.context,
+            wrap = cfg.wrap,
+            counter = cfg.diff_counter,
             deep_diff = cfg.deep_diff,
             keymaps = cfg.keymaps.diff,
             staging = opts.staging,

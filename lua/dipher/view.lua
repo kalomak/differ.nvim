@@ -18,23 +18,6 @@ local FOLDTEXT_EXPR = 'v:lua.require("dipher.ui.foldtext").render()'
 local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
 local CTRL_U = vim.api.nvim_replace_termcodes("<C-u>", true, false, true)
 
--- the window-local options dipher overrides for a diff window (_setup_window +
--- _apply_folds); reset to their global default when jumping to the real file (§8.1)
--- so the dressing doesn't leak onto it
-local WINDOW_DRESSING = {
-    "statuscolumn",
-    "number",
-    "relativenumber",
-    "signcolumn",
-    "foldcolumn",
-    "wrap",
-    "scrollbind",
-    "foldmethod",
-    "foldtext",
-    "foldenable",
-    "foldlevel",
-}
-
 local set_wo = require("dipher.util.win").set_local
 
 ---@type table<integer, dipher.View> -- bufnr -> owning view, for command dispatch
@@ -63,6 +46,8 @@ local by_buf = {}
 ---@field model dipher.DiffModel
 ---@field layout dipher.Layout
 ---@field context integer
+---@field wrap boolean  -- soft-wrap long lines in the diff windows
+---@field counter boolean  -- hunk-counter winbar on the diff windows
 ---@field deep_diff table
 ---@field keymaps table
 ---@field can_stage boolean  -- session-level: bind s/u (worktree-status panels)
@@ -74,6 +59,8 @@ View.__index = View
 ---@class dipher.view.Opts
 ---@field layout dipher.Layout
 ---@field context integer
+---@field wrap? boolean
+---@field counter? boolean
 ---@field deep_diff table
 ---@field keymaps? table
 ---@field staging? dipher.view.Staging
@@ -90,6 +77,8 @@ function View.new(model, opts)
         model = model,
         layout = opts.layout,
         context = opts.context,
+        wrap = opts.wrap ~= false, -- default on; only an explicit false disables it
+        counter = opts.counter ~= false, -- default on; only an explicit false disables it
         deep_diff = opts.deep_diff,
         -- the diff surface's resolved action -> lhs map; default to the shared
         -- defaults so a directly-constructed View still binds (merge keeps partials)
@@ -380,7 +369,11 @@ function View:_setup_window(winid, bufnr)
     set_wo(winid, "relativenumber", false)
     set_wo(winid, "signcolumn", "no")
     set_wo(winid, "foldcolumn", "0")
-    set_wo(winid, "wrap", false)
+    set_wo(winid, "wrap", self.wrap)
+    if self.counter then
+        -- a `%!` expression so the hunk count tracks the cursor on every redraw
+        set_wo(winid, "winbar", '%!v:lua.require("dipher.ui.winbar").diff()')
+    end
     set_wo(winid, "scrollbind", false) -- cleared default; split re-enables it in :open
     set_wo(winid, "statuscolumn", STATUSCOLUMN_EXPR)
     local km = self.keymaps
@@ -772,30 +765,24 @@ function View:jump_to_file()
         or vim.api.nvim_get_current_win()
     local target = nav.file_line(col.map, vim.api.nvim_win_get_cursor(win)[1])
 
-    -- load the real file into the focused window, which survives the teardown. shed
-    -- dipher's window dressing first (each option back to its global default) so it
-    -- doesn't leak onto the real file, e.g. the custom statuscolumn rendering a blank
-    -- gutter against no rail cache. done before :edit so filetype autocmds (folds,
-    -- treesitter) still win
-    vim.api.nvim_set_current_win(win)
-    for _, opt in ipairs(WINDOW_DRESSING) do
-        set_wo(win, opt, vim.go[opt])
+    -- end the session: closing the panel/history tabcloses the dipher tab (via its
+    -- on_close). then hop back to the invoking tab and open the real file there, so
+    -- the diff tab doesn't linger. the owner carries the tab to return to
+    local owner = require("dipher.panel").current() or require("dipher.history").current()
+    local return_tab = owner and owner.return_tab
+    if owner then
+        owner:close()
+    else
+        self:close()
+    end
+    if return_tab and vim.api.nvim_tabpage_is_valid(return_tab) then
+        vim.api.nvim_set_current_tabpage(return_tab)
     end
     vim.cmd.edit(vim.fn.fnameescape(abs))
     if target then
-        pcall(vim.api.nvim_win_set_cursor, win, { target, 0 })
+        pcall(vim.api.nvim_win_set_cursor, 0, { target, 0 })
         vim.cmd("normal! zz")
     end
-
-    -- end the session. the panel drives this view, so drop its on_close (which
-    -- would re-close `win`) before tearing it down, then discard our own buffers
-    -- and windows while sparing the one now holding the real file
-    local panel = require("dipher.panel").current()
-    if panel then
-        panel.on_close = nil
-        panel:close()
-    end
-    self:close(win)
 end
 
 -- lay the columns into windows. the first column anchors on its existing window

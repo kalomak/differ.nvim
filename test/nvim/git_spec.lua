@@ -123,6 +123,64 @@ describe(":Dipher panel", function()
         assert.is_nil(Panel.current())
     end)
 
+    it("the panel winbar reports the cursor's file position", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "1\n2\n")
+        write(root .. "/z.lua", "z1\nz2\n")
+        git(root, "add", "z.lua")
+        git(root, "commit", "-q", "-am", "two files")
+        write(root .. "/a.lua", "1x\n2\n") -- a.lua modified, unstaged
+        write(root .. "/z.lua", "z1x\nz2\n") -- z.lua modified, unstaged
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        local winbar = require("dipher.ui.winbar")
+        vim.g.statusline_winid = p.winid
+        vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "a.lua"), 0 })
+        assert.is_truthy(winbar.panel():find("file 1/2", 1, true))
+        vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "z.lua"), 0 })
+        assert.is_truthy(winbar.panel():find("file 2/2", 1, true))
+        vim.g.statusline_winid = nil
+        p:close()
+    end)
+
+    it("runs the session in its own tabpage and returns to the origin tab on close", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+        local origin_tab = vim.api.nvim_get_current_tabpage()
+        local origin_buf = vim.api.nvim_get_current_buf()
+        local ntabs = #vim.api.nvim_list_tabpages()
+
+        git_src.panel({ open_first = true })
+        -- the diff opened in a fresh tabpage; the invoking tab is untouched
+        assert.are.equal(ntabs + 1, #vim.api.nvim_list_tabpages())
+        assert.are_not.equal(origin_tab, vim.api.nvim_get_current_tabpage())
+        assert.matches("dipher://", vim.api.nvim_buf_get_name(0))
+
+        require("dipher.git").close()
+        -- back in the origin tab, original buffer intact, the session tab dropped
+        assert.are.equal(ntabs, #vim.api.nvim_list_tabpages())
+        assert.are.equal(origin_tab, vim.api.nvim_get_current_tabpage())
+        assert.are.equal(origin_buf, vim.api.nvim_get_current_buf())
+    end)
+
+    it("opens the real file in the origin tab on jump-to-file (gofile)", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+        local origin_tab = vim.api.nvim_get_current_tabpage()
+        local ntabs = #vim.api.nvim_list_tabpages()
+
+        git_src.panel({ open_first = true })
+        require("dipher").jump_to_file()
+        -- the session tab is gone and we're back in the origin tab on the real file
+        assert.are.equal(ntabs, #vim.api.nvim_list_tabpages())
+        assert.are.equal(origin_tab, vim.api.nvim_get_current_tabpage())
+        assert.are.equal("a.lua", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"))
+    end)
+
     it("binds f/b quarter-scroll in the panel window too", function()
         local root = fresh_repo()
         write(root .. "/a.lua", "local x = 2\nreturn x\n")

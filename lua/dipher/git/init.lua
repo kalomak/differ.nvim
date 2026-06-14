@@ -46,6 +46,31 @@ local function chomp(s)
     return (s:gsub("%s+$", ""))
 end
 
+-- run a session in its own tabpage (like diffview, §8.6): the tab :Dipher was invoked
+-- from is never touched, so ending the session drops the tab and returns there with
+-- the dashboard / file / window layout intact. `tab split` carries the current buffer
+-- in, so it stays displayed in the invoking tab and isn't wiped when the diff takes
+-- the session window. returns the tab to return to and the new session tab
+---@return integer return_tab, integer session_tab
+local function open_session_tab()
+    local return_tab = vim.api.nvim_get_current_tabpage()
+    vim.cmd("tab split")
+    return return_tab, vim.api.nvim_get_current_tabpage()
+end
+
+-- close a session's tabpage, never leaving zero tabs (mirrors diffview). a no-op when
+-- it's already gone: closing the last session window can collapse the tab first
+---@param tab integer|nil
+local function close_session_tab(tab)
+    if not (tab and vim.api.nvim_tabpage_is_valid(tab)) then
+        return
+    end
+    if #vim.api.nvim_list_tabpages() == 1 then
+        vim.cmd("tabnew")
+    end
+    pcall(vim.cmd, "tabclose " .. vim.api.nvim_tabpage_get_number(tab))
+end
+
 -- repo root containing `path` (a file or directory), or nil if not in a repo
 ---@param path string
 ---@return string|nil
@@ -680,17 +705,23 @@ function M.panel(opts)
         end
     end
 
+    -- per-call opts (e.g. `:Dipher panel`) win, else the resolved config's panel
+    -- defaults, else Panel.new's own hardcoded fallbacks
+    local cfg = require("dipher").get_config()
+    local panel_cfg = cfg.panel or {}
+    local return_tab, session_tab = open_session_tab()
     panel = Panel.new({
         sections = nonempty,
         root = vim.fn.fnamemodify(root, ":~"), -- ~-relative repo path for the header
         footer = footer_label(args, root),
         actions = actions,
         on_external_change = refresh_external,
-        keymaps = require("dipher").get_config().keymaps.panel,
-        listing = opts.listing,
-        position = opts.position,
-        height = opts.height,
-        width = opts.width,
+        keymaps = cfg.keymaps.panel,
+        listing = opts.listing or panel_cfg.listing,
+        position = opts.position or panel_cfg.position,
+        height = opts.height or panel_cfg.height,
+        width = opts.width or panel_cfg.width,
+        progress = panel_cfg.progress,
         on_select = function(entry)
             if show_entry(entry) then
                 return
@@ -707,8 +738,10 @@ function M.panel(opts)
             if view and view:is_open() then
                 view:close()
             end
+            close_session_tab(session_tab)
         end,
     }):open()
+    panel.return_tab = return_tab
     if opts.open_first then
         -- land on the file (and line) :Dipher was run from when it's in the change
         -- set, else the first file; leave the cursor in the diff, not the panel
@@ -771,7 +804,8 @@ function M.history(opts)
 
     local view ---@type dipher.View|nil -- the single diff view the panel drives
     local cfg = require("dipher").get_config()
-    return History.new({
+    local return_tab, session_tab = open_session_tab()
+    local history = History.new({
         commits = commits,
         path = vim.fn.fnamemodify(file, ":~"),
         keymaps = cfg.keymaps.history,
@@ -789,8 +823,11 @@ function M.history(opts)
             if view and view:is_open() then
                 view:close()
             end
+            close_session_tab(session_tab)
         end,
     }):open()
+    history.return_tab = return_tab
+    return history
 end
 
 -- :Dipher log <range> / the `dp` verb: branch-range history (§8.4). lists the
@@ -825,7 +862,8 @@ function M.range_history(opts)
 
     local view ---@type dipher.View|nil -- the single diff view the panel drives
     local cfg = require("dipher").get_config()
-    return History.new({
+    local return_tab, session_tab = open_session_tab()
+    local history = History.new({
         commits = commits,
         mode = "range",
         path = range, -- the header shows the range in place of a file path
@@ -851,8 +889,11 @@ function M.range_history(opts)
             if view and view:is_open() then
                 view:close()
             end
+            close_session_tab(session_tab)
         end,
     }):open()
+    history.return_tab = return_tab
+    return history
 end
 
 -- :Dipher close: tear down the whole local session: the panel (which closes the
