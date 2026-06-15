@@ -182,6 +182,19 @@ describe("panel runtime position", function()
         p:close()
     end)
 
+    it("caps the content column below the window width for top/bottom panels", function()
+        -- a top/bottom panel spans the full editor width, so the +/- counts are
+        -- pinned to content_width (the configured width), not the far right edge
+        local p = panel({ fe("a.lua") }, { position = "bottom", width = 30 })
+        p:open()
+        local full = vim.api.nvim_win_get_width(p.winid)
+        assert.is_true(full > 30, "expected a full-width bottom split")
+        assert.are.equal(30, p.content_width)
+        p:set_position("right") -- vertical split: content fills the whole window
+        assert.are.equal(vim.api.nvim_win_get_width(p.winid), p.content_width)
+        p:close()
+    end)
+
     it("current() tracks the open panel and clears on close", function()
         local p = panel({ fe("a.lua") })
         p:open()

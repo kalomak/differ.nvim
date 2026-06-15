@@ -78,6 +78,7 @@ local STATUS_HL = {
 ---@field position string
 ---@field height integer
 ---@field width integer
+---@field content_width integer|nil  -- column the list + pinned counts occupy; capped under window width for top/bottom
 ---@field lines string[]
 ---@field meta dipher.panel.LineMeta[]
 ---@field file_total integer|nil  -- total files in the change set (fold-independent)
@@ -219,9 +220,15 @@ function Panel:render()
     end
     self.file_total = total
     local header = self.root and { path = self.root, help = "g?" } or nil
-    -- live width drives the name truncation; fall back to the configured width
-    -- when the window isn't open yet (headless construction / tests)
-    local width = self:is_open() and vim.api.nvim_win_get_width(self.winid) or self.width
+    -- live window width, falling back to the configured width when the window
+    -- isn't open yet (headless construction / tests)
+    local live = self:is_open() and vim.api.nvim_win_get_width(self.winid) or self.width
+    -- a top/bottom panel spans the full editor width, so the window's right edge
+    -- is far from the file list; cap the content column at the configured width
+    -- so name truncation and the pinned +/- counts stay next to the tree
+    local horizontal = self.position == "top" or self.position == "bottom"
+    local width = horizontal and math.min(live, self.width) or live
+    self.content_width = width
     local out = render.lines(blocks, header, self.icon_for, self.footer, width)
     self.lines, self.meta = out.lines, out.meta
     for _, m in ipairs(self.meta) do
@@ -333,17 +340,22 @@ function Panel:_highlight()
             end
             local e = m.entry
             if e and (e.additions > 0 or e.deletions > 0) then
-                -- pin the diffstat to the window's right edge as virtual text, so
-                -- it stays visible at any nesting depth (the line text holds no
-                -- counts; render.lines reserves the room and truncates the name)
+                -- pin the diffstat to the content column as virtual text, so it sits
+                -- next to the tree regardless of panel orientation (the line text
+                -- holds no counts; render.lines reserves the room and truncates the
+                -- name to the same width). win_col, not right_align: a top/bottom
+                -- panel's right edge is the full editor width, far from the list
+                local add = ("+%d"):format(e.additions)
+                local del = ("-%d"):format(e.deletions)
+                local reserve = #add + #del + 2
                 vim.api.nvim_buf_set_extmark(self.bufnr, ns, row, 0, {
                     virt_text = {
-                        { ("+%d"):format(e.additions), "dipherPanelCountAdd" },
+                        { add, "dipherPanelCountAdd" },
                         { " ", "Normal" },
-                        { ("-%d"):format(e.deletions), "dipherPanelCountDelete" },
+                        { del, "dipherPanelCountDelete" },
                         { " ", "Normal" },
                     },
-                    virt_text_pos = "right_align",
+                    virt_text_win_col = math.max((self.content_width or 0) - reserve, 0),
                 })
             end
         end

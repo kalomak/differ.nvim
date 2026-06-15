@@ -58,8 +58,8 @@ end
 -- `icon_for(path)` (supplied by the runtime layer, nvim-web-devicons, so this
 -- stays pure) returns a `(glyph, hl_group)` pair painted before each filename.
 -- the +/- counts aren't in the line text: the runtime layer pins them to the
--- right edge as a virtual-text extmark, so `width` (when given) only reserves
--- room for them and middle-truncates the filename to fit the rest
+-- right of the content column as a virtual-text extmark, so `width` (when given)
+-- only reserves room for them and truncates the filename to fit the rest
 ---@param blocks dipher.panel.Block[]
 ---@param header dipher.panel.Header|nil
 ---@param icon_for nil|fun(path: string): string|nil, string|nil
@@ -140,9 +140,9 @@ function M.lines(blocks, header, icon_for, footer, width)
                     end
                 end
                 m.name_col = #prefix
-                -- reserve right-edge room for the pinned +/- counts so text doesn't
-                -- slide under them; the counts are a virt_text extmark (right_align),
-                -- painted by the runtime layer, not part of the line text
+                -- reserve room at the content column for the pinned +/- counts so
+                -- text doesn't slide under them; the counts are a virt_text extmark
+                -- (pinned by win_col), painted by the runtime layer, not line text
                 local reserve = 0
                 if e.additions and (e.additions > 0 or e.deletions > 0) then
                     reserve = #("+" .. e.additions) + #("-" .. e.deletions) + 2
