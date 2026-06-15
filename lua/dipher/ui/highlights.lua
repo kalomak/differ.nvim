@@ -13,6 +13,10 @@ local M = {}
 ---@type table<string, vim.api.keyset.highlight>
 local LINKS = {
     dipherThreadRange = { link = "Visual" },
+    -- our own cursor-line overlay: CursorLine is low-priority when it has no
+    -- foreground (`:h hl-CursorLine`), so it loses to the diff line backgrounds; we
+    -- repaint it as a line_hl_group above them. links to CursorLine to track the theme
+    dipherCursorLine = { link = "CursorLine" },
     -- staged-hunk overlay (§8.1): a muted full-line bg replacing the vivid
     -- add/delete so a staged hunk reads as set-aside rather than a live change
     dipherStagedLine = { link = "CursorLine" },

@@ -13,6 +13,7 @@ local bind = require("dipher.util.keymap").bind
 
 local ns = vim.api.nvim_create_namespace("dipher")
 local staged_ns = vim.api.nvim_create_namespace("dipher.staging")
+local cursor_ns = vim.api.nvim_create_namespace("dipher.cursorline")
 local STATUSCOLUMN_EXPR = '%!v:lua.require("dipher.ui.statuscolumn").render()'
 local FOLDTEXT_EXPR = 'v:lua.require("dipher.ui.foldtext").render()'
 local CTRL_D = vim.api.nvim_replace_termcodes("<C-d>", true, false, true)
@@ -218,6 +219,7 @@ function View:rerender(opts)
         self.columns[i] = nil
     end
     self:_paint_staged() -- overlay marks for staged hunks (no-op off a staging view)
+    self:_paint_cursorline() -- our cursor-line overlay (no-op until windows exist)
     -- folds are a window concern, not buffer content: the callers that change the
     -- ranges or the windows reapply them (set_context/set_source in place, _relayout
     -- on open / layout toggle), so rerender doesn't, avoiding a double-apply
@@ -245,6 +247,34 @@ function View:_paint_staged()
         end
         statuscolumn.set_staged(col.bufnr, staged_lines)
     end
+end
+
+-- repaint our own cursor line above the diff backgrounds, since a no-foreground
+-- CursorLine is low-priority and gets buried by them. mirrors the diff line bg
+-- (a char-level fill with hl_eol so it spans the whole row past EOL) but at a higher
+-- priority so it wins; bg-only, so syntax foreground and word spans still show
+-- through. cleared from every column and painted only in the focused one (the cursor
+-- lives in one column), so the off-side column shows none. driven by CursorMoved /
+-- WinEnter and after each render
+function View:_paint_cursorline()
+    for _, col in ipairs(self.columns) do
+        if col.bufnr and vim.api.nvim_buf_is_valid(col.bufnr) then
+            vim.api.nvim_buf_clear_namespace(col.bufnr, cursor_ns, 0, -1)
+        end
+    end
+    local col = self:_focused_column()
+    local win = col and col.winid
+    if not (win and vim.api.nvim_win_is_valid(win)) then
+        return
+    end
+    local row = vim.api.nvim_win_get_cursor(win)[1] - 1
+    vim.api.nvim_buf_set_extmark(col.bufnr, cursor_ns, row, 0, {
+        end_row = row + 1,
+        end_col = 0,
+        hl_group = "dipherCursorLine",
+        hl_eol = true, -- fill past EOL so the whole row is covered, like the diff bg
+        priority = 160, -- above the add/delete bg (100); word spans (200) show through
+    })
 end
 
 -- the net line-count delta of the staged hunks before `idx`: the frozen view's
@@ -383,6 +413,16 @@ function View:_setup_window(winid, bufnr)
     end
     set_wo(winid, "scrollbind", false) -- cleared default; split re-enables it in :open
     set_wo(winid, "statuscolumn", STATUSCOLUMN_EXPR)
+    -- own the cursor line: a no-fg CursorLine is low-priority and lost under the diff
+    -- backgrounds, so repaint it as an extmark on cursor move / window focus
+    local group = vim.api.nvim_create_augroup("dipher.cursorline." .. bufnr, { clear = true })
+    vim.api.nvim_create_autocmd({ "CursorMoved", "WinEnter", "BufEnter" }, {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+            self:_paint_cursorline()
+        end,
+    })
     local km = self.keymaps
     bind(bufnr, km.next_hunk, function()
         self:goto_hunk("next")
@@ -848,6 +888,7 @@ end
 function View:open()
     self:_relayout()
     self:_focus_first_hunk() -- start on the first unstaged hunk, not line 1
+    self:_paint_cursorline() -- repaint after the cursor moved off line 1
     return self
 end
 
