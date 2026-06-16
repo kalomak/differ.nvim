@@ -52,31 +52,24 @@ end
 ---@type table<string, true>
 local PANEL_POSITIONS = { left = true, right = true, top = true, bottom = true }
 
--- :Dipher panel [revspec], open the file panel (§8.6) over a change set and show
--- the first file's diff (the diff window is the session anchor, so there's never a
--- panel without one). on a live session it hides/shows the sidebar in place;
--- `:Dipher close` ends the session. `:Dipher panel set <left|right|top|bottom>`
--- repositions a live panel, reveals a hidden sidebar at that position, or opens one
--- there when no session exists; height/width carry over from config
+-- :Dipher panel [left|right|top|bottom|revspec], open the file panel (§8.6) over a
+-- change set and show the first file's diff (the diff window is the session anchor,
+-- so there's never a panel without one). on a live session it hides/shows the sidebar
+-- in place; `:Dipher close` ends the session. a position word repositions a live panel,
+-- reveals a hidden sidebar there, or opens one at that edge when no session exists
+-- (height/width carry over from config); any other arg is a rev spec
 ---@param arg string|nil
----@param pos string|nil  -- the position, for the `set` form
-function M.panel(arg, pos)
-    if arg == "set" then
-        if not PANEL_POSITIONS[pos] then
-            return notify(
-                "panel set: expected 'left', 'right', 'top' or 'bottom'",
-                vim.log.levels.ERROR
-            )
-        end
+function M.panel(arg)
+    if arg and PANEL_POSITIONS[arg] then
         local panel = require("dipher.panel").current()
         if panel then
-            panel:set_position(pos) -- records position; repositions live if shown
+            panel:set_position(arg) -- records position; repositions live if shown
             if not panel:is_open() then
                 panel:show() -- hidden sidebar: reveal it at the new position
             end
             return
         end
-        return require("dipher.git").panel({ position = pos, open_first = true })
+        return require("dipher.git").panel({ position = arg, open_first = true })
     end
     require("dipher.git").panel({ rev = (arg ~= "" and arg) or nil, open_first = true })
 end
@@ -200,7 +193,7 @@ end
 local VALUES = {
     layout = { "stacked", "split" },
     context = { "full", "+", "-" },
-    panel = { "set" },
+    panel = { "left", "right", "top", "bottom" },
     -- later slices implement these sub-verbs; listing now keeps completion stable
     pr = {
         "list",
@@ -221,11 +214,8 @@ local VALUES = {
     sidecar = { "stop" },
     cache = { "clear" },
 }
--- the nested value set for `:Dipher panel set <pos>`
-local PANEL_SET_VALUES = { "left", "right", "top", "bottom" }
 
--- completion: subcommands at position 1, then that subcommand's value set, plus the
--- one nested case `:Dipher panel set <pos>`
+-- completion: subcommands at position 1, then that subcommand's value set
 ---@param arglead string
 ---@param cmdline string
 ---@return string[]
@@ -233,9 +223,7 @@ function M.complete(arglead, cmdline)
     local parts = vim.split(vim.trim(cmdline), "%s+")
     -- parts[1] == "Dipher"; completing the subcommand while on parts[2]
     local pool
-    if parts[2] == "panel" and parts[3] == "set" then
-        pool = PANEL_SET_VALUES
-    elseif #parts < 2 or (#parts == 2 and arglead ~= "") then
+    if #parts < 2 or (#parts == 2 and arglead ~= "") then
         pool = vim.tbl_keys(SUB)
     else
         pool = VALUES[parts[2]] or {}

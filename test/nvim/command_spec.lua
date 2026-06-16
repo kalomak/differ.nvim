@@ -1,5 +1,5 @@
 -- runs under headless nvim: the :Dipher subcommand router. completion is pure
--- string logic; the `panel set` routing drives a live Panel (no git source needed,
+-- string logic; the `panel <pos>` routing drives a live Panel (no git source needed,
 -- since Panel.current() tracks any open panel)
 local command = require("dipher.command")
 local Panel = require("dipher.panel")
@@ -25,17 +25,9 @@ describe("command completion", function()
         assert.is_true(vim.tbl_contains(out, "layout"))
     end)
 
-    it("offers 'set' under panel", function()
-        assert.are.same({ "set" }, command.complete("", "Dipher panel "))
-        assert.are.same({ "set" }, command.complete("s", "Dipher panel s"))
-    end)
-
-    it("offers positions under 'panel set'", function()
-        assert.are.same(
-            { "left", "right", "top", "bottom" },
-            command.complete("", "Dipher panel set ")
-        )
-        assert.are.same({ "left" }, command.complete("l", "Dipher panel set l"))
+    it("offers positions under panel", function()
+        assert.are.same({ "left", "right", "top", "bottom" }, command.complete("", "Dipher panel "))
+        assert.are.same({ "left" }, command.complete("l", "Dipher panel l"))
     end)
 end)
 
@@ -53,10 +45,10 @@ describe("command panel", function()
     end)
 end)
 
-describe("command panel set", function()
+describe("command panel position", function()
     it("repositions the live panel", function()
         local p = open_panel()
-        command.panel("set", "right")
+        command.panel("right")
         assert.are.equal("right", p.position)
         assert.is_true(p:is_open())
         p:close()
@@ -70,16 +62,24 @@ describe("command panel set", function()
         git.panel = function(opts)
             got = opts
         end
-        command.panel("set", "top")
+        command.panel("top")
         git.panel = saved
         -- open_first so a fresh panel always shows a diff (the session anchor, §8.1)
         assert.are.same({ position = "top", open_first = true }, got)
     end)
 
-    it("ignores an unknown position", function()
+    it("treats a non-position arg as a rev spec, not a position", function()
         local p = open_panel()
-        command.panel("set", "lfet")
+        local git = require("dipher.git")
+        local saved = git.panel
+        local got
+        git.panel = function(opts)
+            got = opts
+        end
+        command.panel("lfet") -- a typo'd position is just a rev spec; panel stays put
+        git.panel = saved
         assert.are.equal("bottom", p.position) -- unchanged
+        assert.are.equal("lfet", got.rev)
         p:close()
     end)
 end)
