@@ -75,6 +75,11 @@ end
 -- the staged-gutter cell when this is a staging-capable view
 ---@return string
 function M.render()
+    -- virtual lines (our thread overlay's virt_lines) reuse the anchor's lnum; without
+    -- this they'd echo the anchor's gutter number. v:virtnum is non-zero on them
+    if vim.v.virtnum ~= 0 then
+        return ""
+    end
     local buf = vim.g.statusline_winid and vim.api.nvim_win_get_buf(vim.g.statusline_winid)
     local cache = buf and rails[buf]
     if not cache then

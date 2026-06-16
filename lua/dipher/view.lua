@@ -79,6 +79,8 @@ local armed_view = nil
 ---@field staged_hunks table<integer, boolean>  -- hunk index -> staged, for marking
 ---@field on_edit_unstage fun(path: string)|nil  -- frontend hook: unstage + re-source for edit-in-review
 ---@field extra_keymaps dipher.panel.ExtraMap[]|nil  -- session-supplied buffer maps (pr unviewed nav)
+---@field on_rerender fun()|nil  -- session hook after a re-render, to re-apply overlays (pr threads)
+---@field on_cursor fun()|nil  -- session hook on cursor move in a diff window (pr thread cursor-expand)
 ---@field edit_win integer|nil  -- transient editable real-file window (edit-in-review, §8.1)
 ---@field id integer  -- per-view id, for the close-guard augroup name
 ---@field _suppress_close boolean  -- true while we close a diff window ourselves (relayout/teardown)
@@ -98,6 +100,8 @@ View.__index = View
 ---@field can_stage? boolean
 ---@field on_edit_unstage? fun(path: string)
 ---@field extra_keymaps? dipher.panel.ExtraMap[]
+---@field on_rerender? fun()
+---@field on_cursor? fun()
 
 -- build a view for a model. buffers and data are created here; windows are not
 -- touched until :open(), so a View can be constructed headlessly for tests
@@ -125,6 +129,8 @@ function View.new(model, opts)
         on_edit_unstage = opts.on_edit_unstage,
         -- session-supplied maps the generic diff surface doesn't own (pr unviewed nav)
         extra_keymaps = opts.extra_keymaps,
+        on_rerender = opts.on_rerender,
+        on_cursor = opts.on_cursor,
         staged_hunks = {},
         id = next_id(),
         _suppress_close = false,
@@ -220,6 +226,20 @@ function View:map_for(side)
     return nil
 end
 
+-- the column (bufnr + map) backing a side, for consumers that set extmarks on the
+-- right buffer (the thread overlay). a stacked view's single "unified" column backs
+-- both sides; a split returns the matching old/new column
+---@param side dipher.ColumnSide
+---@return { bufnr: integer, map: dipher.LineMap, side: dipher.ColumnSide }|nil
+function View:column_for(side)
+    for _, col in ipairs(self.columns) do
+        if col.side == side or col.side == "unified" then
+            return col
+        end
+    end
+    return nil
+end
+
 -- re-render the active model and atomically replace each column's content, map,
 -- gutter rail, and highlight layer. window layout is unchanged; if a re-render
 -- changes the column count (a layout toggle), call :open() to relayout
@@ -258,6 +278,9 @@ function View:rerender(opts)
     end
     self:_paint_staged() -- overlay marks for staged hunks (no-op off a staging view)
     self:_paint_cursorline() -- our cursor-line overlay (no-op until windows exist)
+    if self.on_rerender then
+        self.on_rerender() -- re-apply session overlays (the pr thread overlay) onto the fresh buffers
+    end
     -- folds are a window concern, not buffer content: the callers that change the
     -- ranges or the windows reapply them (set_context/set_source in place, _relayout
     -- on open / layout toggle), so rerender doesn't, avoiding a double-apply
@@ -464,6 +487,9 @@ function View:_setup_window(winid, bufnr)
         buffer = bufnr,
         callback = function()
             self:_paint_cursorline()
+            if self.on_cursor then
+                self.on_cursor() -- session cursor hook (the pr thread cursor-expand)
+            end
         end,
     })
     local km = self.keymaps
