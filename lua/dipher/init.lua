@@ -162,7 +162,7 @@ function M.jump_to_file()
     view:jump_to_file()
 end
 
--- edit-in-review (§8.1, the `de` keymap): open the real worktree file in a transient
+-- edit-in-review (§8.1, the `df` keymap): open the real worktree file in a transient
 -- editable window at the mapped line, keeping the session; `:w` re-sources the diff.
 -- works from the panel too (acts on the driven view); a no-op with a notice when no
 -- diff is active

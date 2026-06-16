@@ -24,6 +24,17 @@ local set_wo = require("dipher.util.win").set_local
 ---@type table<integer, dipher.View> -- bufnr -> owning view, for command dispatch
 local by_buf = {}
 
+-- place the cursor at (line, col) in the current window, clamping the column to the
+-- target line's length so a column past EOL doesn't fail the set and strand us at the
+-- top of the file. used by de/df, which carry the diff cursor's column to the real file
+---@param line integer
+---@param col integer
+local function place_cursor(line, col)
+    local text = vim.api.nvim_buf_get_lines(0, line - 1, line, false)[1] or ""
+    pcall(vim.api.nvim_win_set_cursor, 0, { line, math.min(col, #text) })
+    vim.cmd("normal! zz")
+end
+
 -- monotonic per-view id, for a stable per-view augroup name (the close guard)
 local view_seq = 0
 local function next_id()
@@ -889,7 +900,7 @@ function View:jump_to_file()
     local col = self:_focused_column()
     local win = (col.winid and vim.api.nvim_win_is_valid(col.winid)) and col.winid
         or vim.api.nvim_get_current_win()
-    local target = nav.file_line(col.map, vim.api.nvim_win_get_cursor(win)[1])
+    local target, tcol = self:_file_pos(col, win)
 
     -- end the session: closing the panel/history tabcloses the dipher tab (via its
     -- on_close). then hop back to the invoking tab and open the real file there, so
@@ -906,9 +917,23 @@ function View:jump_to_file()
     end
     vim.cmd.edit(vim.fn.fnameescape(abs))
     if target then
-        pcall(vim.api.nvim_win_set_cursor, 0, { target, 0 })
-        vim.cmd("normal! zz")
+        place_cursor(target, tcol)
     end
+end
+
+-- the real-file (new-side) position for de/df: the cursor line's mapped `new` line
+-- (§6.2) plus its column, but the column is carried only when the cursor's own line
+-- maps 1:1 to a new-side line. a deleted/meta line redirects to a different line where
+-- the column is meaningless, so it lands at column 0 there
+---@param col dipher.ViewColumn
+---@param win integer
+---@return integer|nil line, integer col
+function View:_file_pos(col, win)
+    local crow, ccol = unpack(vim.api.nvim_win_get_cursor(win))
+    local target = nav.file_line(col.map, crow)
+    local here = col.map.lines[crow]
+    local tcol = (target and here and here.new == target) and ccol or 0
+    return target, tcol
 end
 
 -- whether the new side is a live working-tree state (worktree or index), so the file
@@ -951,7 +976,7 @@ function View:edit_file()
     local col = self:_focused_column()
     local win = (col.winid and vim.api.nvim_win_is_valid(col.winid)) and col.winid
         or vim.api.nvim_get_current_win()
-    local target = nav.file_line(col.map, vim.api.nvim_win_get_cursor(win)[1]) -- §6.2
+    local target, tcol = self:_file_pos(col, win) -- §6.2
 
     -- staged diff: unstage the file and re-source to its unstaged index↔worktree view
     -- so the edit lands on a diff that reflects it. driven explicitly (the watcher's
@@ -965,7 +990,7 @@ function View:edit_file()
         end
     end
 
-    self:_open_edit_window(abs, target, col.winid)
+    self:_open_edit_window(abs, target, tcol, col.winid)
 end
 
 -- open (or reuse) the edit window and load `abs` at `target`. split off the diff
@@ -973,8 +998,9 @@ end
 -- hook keeps `edit_win` in sync when the user closes it natively (`:q`)
 ---@param abs string
 ---@param target integer|nil
+---@param tcol integer  -- the new-side column carried from the diff cursor
 ---@param anchor_win integer|nil  -- a diff window to split from
-function View:_open_edit_window(abs, target, anchor_win)
+function View:_open_edit_window(abs, target, tcol, anchor_win)
     if self.edit_win and vim.api.nvim_win_is_valid(self.edit_win) then
         vim.api.nvim_set_current_win(self.edit_win)
     else
@@ -998,8 +1024,7 @@ function View:_open_edit_window(abs, target, anchor_win)
     end
     vim.cmd.edit(vim.fn.fnameescape(abs))
     if target then
-        pcall(vim.api.nvim_win_set_cursor, 0, { target, 0 })
-        vim.cmd("normal! zz")
+        place_cursor(target, tcol)
     end
 end
 

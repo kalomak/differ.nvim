@@ -230,6 +230,29 @@ describe(":Dipher panel", function()
         assert.are.equal("a.lua", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"))
     end)
 
+    it("carries the diff cursor's column to the real file on jump-to-file", function()
+        local root = fresh_repo()
+        -- add a long line so a non-zero column is meaningful; line 2 is new-side only
+        write(root .. "/a.lua", "local x = 1\nlocal answer = 42\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+
+        git_src.panel({ open_first = true })
+        local col = require("dipher.view").current().columns[1]
+        local brow
+        for i, l in ipairs(col.map.lines) do
+            if l.new == 2 then -- buffer row of new-side line 2
+                brow = i
+                break
+            end
+        end
+        assert.is_not_nil(brow)
+        vim.api.nvim_win_set_cursor(col.winid, { brow, 6 }) -- the "a" of "answer"
+        require("dipher").jump_to_file()
+
+        assert.are.equal("a.lua", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"))
+        assert.are.same({ 2, 6 }, vim.api.nvim_win_get_cursor(0)) -- exact line + column
+    end)
+
     it("binds f/b quarter-scroll in the panel window too", function()
         local root = fresh_repo()
         write(root .. "/a.lua", "local x = 2\nreturn x\n")
