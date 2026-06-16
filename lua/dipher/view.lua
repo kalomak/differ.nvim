@@ -936,12 +936,19 @@ function View:_file_pos(col, win)
     return target, tcol
 end
 
--- whether the new side is a live working-tree state (worktree or index), so the file
--- on disk is the editable target. excludes committed sources (rev↔rev, history, PR),
--- whose new side is a sha the worktree file doesn't correspond to
+-- whether edit-in-review applies: the diff is the working tree (or index) against its
+-- immediate committed/staged base, so every shown hunk is an uncommitted change and the
+-- file on disk is the editable target. the daily staging sources qualify (HEAD↔worktree,
+-- INDEX↔worktree, HEAD↔index); a `<rev>↔worktree` open (`:Dipher HEAD~1`, `main...`)
+-- does not, since it folds in committed history you can't edit in place, and committed
+-- sources (rev↔rev, history, PR) never do
 ---@return boolean
 function View:_editable_source()
-    return self.model.new_rev == "WORKTREE" or self.model.new_rev == "INDEX"
+    local old, new = self.model.old_rev, self.model.new_rev
+    if new == "WORKTREE" then
+        return old == "HEAD" or old == "INDEX"
+    end
+    return new == "INDEX" and old == "HEAD"
 end
 
 -- edit-in-review (§8.1): pop the real working-tree file into a transient editable

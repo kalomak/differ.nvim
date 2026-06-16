@@ -1033,6 +1033,30 @@ describe(":Dipher diff hunk staging (§8.1)", function()
         assert.is_nil(lhs2["U"])
         p2:close()
     end)
+
+    it("binds df only on a worktree-vs-base source, not a `<rev>↔worktree` open", function()
+        local root = fresh_repo()
+        write(root .. "/a.lua", "local x = 2\nreturn x\n")
+        vim.cmd.edit(root .. "/a.lua")
+
+        -- default `:Dipher` is HEAD↔worktree (uncommitted): df is bound
+        git_src.panel({ rev = {}, open_first = true })
+        local p = Panel.current()
+        assert.is_true(keymaps(view_in_origin(p).columns[1].bufnr)["df"])
+        p:close()
+
+        -- commit so the worktree is clean, then `:Dipher HEAD~1` is <rev>↔worktree:
+        -- it folds in committed history, so edit-in-review must be off (df unbound)
+        git(root, "commit", "-q", "-am", "edit")
+        git_src.panel({ rev = "HEAD~1", open_first = true })
+        local p2 = Panel.current()
+        local v2 = view_in_origin(p2)
+        assert.are.equal("WORKTREE", v2.model.new_rev) -- new side is the worktree...
+        assert.are.equal("HEAD~1", v2.model.old_rev) -- ...but the base is an older rev
+        assert.is_nil(keymaps(v2.columns[1].bufnr)["df"])
+        assert.is_false(v2:_editable_source())
+        p2:close()
+    end)
 end)
 
 describe(":Dipher panel <-> diff wiring", function()
