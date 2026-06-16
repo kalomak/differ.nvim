@@ -20,6 +20,8 @@ type mockAPI struct {
 	gotFilter   string
 	gotNumber   int
 	gotPath     string
+	gotBase     string
+	gotHead     string
 	gotReviewID string
 	gotEvent    string
 	gotComment  github.PostCommentInput
@@ -44,10 +46,12 @@ func (m *mockAPI) GetPR(_ context.Context, _, _ string, number int) (*github.PRD
 	return m.detail, nil
 }
 
-func (m *mockAPI) GetFileVersions(_ context.Context, _, _ string, number int, path string) (*github.FileVersions, error) {
+func (m *mockAPI) GetFileVersions(_ context.Context, _, _ string, number int, path, base, head string) (*github.FileVersions, error) {
 	m.called = true
 	m.gotNumber = number
 	m.gotPath = path
+	m.gotBase = base
+	m.gotHead = head
 	return &github.FileVersions{}, nil
 }
 
@@ -196,12 +200,15 @@ func TestMalformedParams(t *testing.T) {
 
 func TestGetFileVersionsRoutes(t *testing.T) {
 	m := &mockAPI{}
-	_, err := deps(m).getFileVersions(context.Background(), json.RawMessage(`{"owner":"o","repo":"r","number":7,"path":"a.go"}`))
+	_, err := deps(m).getFileVersions(context.Background(), json.RawMessage(`{"owner":"o","repo":"r","number":7,"path":"a.go","base":"B","head":"H"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if m.gotNumber != 7 || m.gotPath != "a.go" {
 		t.Errorf("params not forwarded: number=%d path=%q", m.gotNumber, m.gotPath)
+	}
+	if m.gotBase != "B" || m.gotHead != "H" {
+		t.Errorf("pinned refs not forwarded: base=%q head=%q", m.gotBase, m.gotHead)
 	}
 }
 

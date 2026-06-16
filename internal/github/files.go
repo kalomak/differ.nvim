@@ -11,24 +11,39 @@ import (
 	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
 )
 
-// GetFileVersions returns the full base and head blobs for one path in a PR. it
-// resolves the PR's base/head SHA, then fetches each side via the Contents API raw
-// media type; a 404 on a side marks it missing (an added file has no base, a
-// deleted file has no head) rather than failing the call.
-func (c *Client) GetFileVersions(ctx context.Context, owner, repo string, number int, path string) (*FileVersions, error) {
-	base, head, err := c.prRefs(ctx, owner, repo, number)
-	if err != nil {
-		return nil, err
+// GetFileVersions returns the full base and head blobs for one path in a PR. the
+// caller passes the pinned base/head shas (from get_pr) so the prRefs round-trip is
+// skipped and the exact session blobs are fetched; an empty sha falls back to
+// resolving it. the two sides are fetched concurrently (independent immutable blobs,
+// cache is mutex-guarded for fan-out). a 404 on a side marks it missing (an added
+// file has no base, a deleted file has no head) rather than failing the call.
+func (c *Client) GetFileVersions(ctx context.Context, owner, repo string, number int, path, base, head string) (*FileVersions, error) {
+	if base == "" || head == "" {
+		rbase, rhead, err := c.prRefs(ctx, owner, repo, number)
+		if err != nil {
+			return nil, err
+		}
+		base, head = rbase, rhead
 	}
-	baseBlob, err := c.rawBlob(ctx, owner, repo, path, base)
-	if err != nil {
-		return nil, err
+
+	type blobResult struct {
+		blob FileBlob
+		err  error
 	}
-	headBlob, err := c.rawBlob(ctx, owner, repo, path, head)
-	if err != nil {
-		return nil, err
+	baseCh := make(chan blobResult, 1)
+	go func() {
+		b, err := c.rawBlob(ctx, owner, repo, path, base)
+		baseCh <- blobResult{b, err}
+	}()
+	headBlob, headErr := c.rawBlob(ctx, owner, repo, path, head)
+	baseRes := <-baseCh
+	if baseRes.err != nil {
+		return nil, baseRes.err
 	}
-	return &FileVersions{Base: baseBlob, Head: headBlob}, nil
+	if headErr != nil {
+		return nil, headErr
+	}
+	return &FileVersions{Base: baseRes.blob, Head: headBlob}, nil
 }
 
 // prRefs resolves a PR's base and head commit SHAs via REST (lighter than the

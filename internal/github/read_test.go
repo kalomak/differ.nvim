@@ -28,7 +28,7 @@ func TestGetFileVersions(t *testing.T) {
 		t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		return nil, nil
 	})
-	fv, err := c.GetFileVersions(context.Background(), "o", "r", 3, "dir/a.go")
+	fv, err := c.GetFileVersions(context.Background(), "o", "r", 3, "dir/a.go", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +37,28 @@ func TestGetFileVersions(t *testing.T) {
 	}
 	if fv.Base.Missing || fv.Head.Missing || fv.Truncated {
 		t.Errorf("flags should be clear for a present file: %+v", fv)
+	}
+}
+
+// pinned base/head shas (from get_pr) skip the prRefs round-trip: the /pulls/3
+// endpoint is never hit, and the blobs are fetched at the passed shas.
+func TestGetFileVersionsPinnedRefsSkipPrRefs(t *testing.T) {
+	c := newClient(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/pulls/3"):
+			t.Fatalf("prRefs should be skipped when base/head are pinned")
+		case strings.Contains(r.URL.Path, "/contents/a.go"):
+			return resp(200, "content@"+r.URL.Query().Get("ref"), nil), nil
+		}
+		t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		return nil, nil
+	})
+	fv, err := c.GetFileVersions(context.Background(), "o", "r", 3, "a.go", "pinbase", "pinhead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fv.Base.Content != "content@pinbase" || fv.Head.Content != "content@pinhead" {
+		t.Errorf("blobs not fetched at the pinned shas: %+v", fv)
 	}
 }
 
@@ -54,7 +76,7 @@ func TestGetFileVersionsAddedFileMissingBase(t *testing.T) {
 		t.Fatalf("unexpected request %s", r.URL.Path)
 		return nil, nil
 	})
-	fv, err := c.GetFileVersions(context.Background(), "o", "r", 3, "new.go")
+	fv, err := c.GetFileVersions(context.Background(), "o", "r", 3, "new.go", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +95,7 @@ func TestGetFileVersionsPropagatesError(t *testing.T) {
 		}
 		return resp(401, `{"message":"Bad credentials"}`, nil), nil
 	})
-	_, err := c.GetFileVersions(context.Background(), "o", "r", 3, "a.go")
+	_, err := c.GetFileVersions(context.Background(), "o", "r", 3, "a.go", "", "")
 	if codeOf(t, err) != protocol.CodeAuth {
 		t.Fatalf("want auth, got %v", err)
 	}

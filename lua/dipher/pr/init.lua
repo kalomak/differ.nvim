@@ -159,7 +159,8 @@ local function prefetch_around(entry)
             if nb and not session.versions[nb.path] and not session.prefetching[nb.path] then
                 local path = nb.path
                 session.prefetching[path] = true
-                client.get_file_versions(session.pr, path, function(err, vers)
+                local refs = { base = session.pr_meta.base_sha, head = session.pr_meta.head_sha }
+                client.get_file_versions(session.pr, path, refs, function(err, vers)
                     if not session then
                         return -- session torn down while the prefetch was in flight
                     end
@@ -207,8 +208,10 @@ local function show_file(entry, focus_line)
     end
     -- pass entry.path, not previous_path: the sidecar fetches one path at both refs,
     -- so a rename shows its head content as an add (true rename diffing is a later
-    -- sidecar concern; this keeps open-and-navigate correct for the common cases)
-    client.get_file_versions(session.pr, entry.path, function(err, vers)
+    -- sidecar concern; this keeps open-and-navigate correct for the common cases).
+    -- the pinned shas skip the sidecar's prRefs round-trip (§7.5 latency discipline)
+    local refs = { base = session.pr_meta.base_sha, head = session.pr_meta.head_sha }
+    client.get_file_versions(session.pr, entry.path, refs, function(err, vers)
         if err then
             return notify_err(err)
         end

@@ -30,16 +30,23 @@ function M.get_pr(pr, cb)
 end
 
 -- get_file_versions result: {base: {content, missing?}, head: {content, missing?},
--- truncated?}. the sidecar fetches `path` at both the base and head refs
+-- truncated?}. the sidecar fetches `path` at both the base and head refs. pass the
+-- pinned `refs` ({base, head} from get_pr) so the sidecar skips the prRefs round-trip
+-- and fetches the exact session blobs; omit to let the sidecar resolve them
 ---@param pr { owner: string, repo: string, number: integer }
 ---@param path string
+---@param refs { base?: string, head?: string }|nil
 ---@param cb fun(err: table|nil, result: any)
-function M.get_file_versions(pr, path, cb)
-    sidecar.request(
-        "get_file_versions",
-        { owner = pr.owner, repo = pr.repo, number = pr.number, path = path },
-        cb
-    )
+function M.get_file_versions(pr, path, refs, cb)
+    refs = refs or {}
+    sidecar.request("get_file_versions", {
+        owner = pr.owner,
+        repo = pr.repo,
+        number = pr.number,
+        path = path,
+        base = refs.base,
+        head = refs.head,
+    }, cb)
 end
 
 -- set_file_viewed result: {viewed_state} (VIEWED|DISMISSED|UNVIEWED). flips the

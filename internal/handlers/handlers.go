@@ -25,7 +25,7 @@ type Registry map[string]Handler
 type API interface {
 	ListPRs(ctx context.Context, owner, repo, filter string) ([]github.PR, error)
 	GetPR(ctx context.Context, owner, repo string, number int) (*github.PRDetail, error)
-	GetFileVersions(ctx context.Context, owner, repo string, number int, path string) (*github.FileVersions, error)
+	GetFileVersions(ctx context.Context, owner, repo string, number int, path, base, head string) (*github.FileVersions, error)
 	GetThreads(ctx context.Context, owner, repo string, number int) ([]github.Thread, error)
 	GetPendingReview(ctx context.Context, owner, repo string, number int) (*github.PendingReview, error)
 	GetChecks(ctx context.Context, owner, repo string, number int) (*github.Checks, error)
