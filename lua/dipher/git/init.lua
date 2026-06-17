@@ -565,7 +565,9 @@ function M.panel(opts)
         model_for = function(entry)
             local s = entry.staged and { old = HEAD, new = INDEX }
                 or { old = INDEX, new = WORKTREE }
-            return M.model(s, root, entry, branch)
+            -- re-read HEAD per build so a branch switch under an open panel updates
+            -- the synthetic buffer's statusline label, not just the diff content
+            return M.model(s, root, entry, head_branch(root))
         end
         actions = {
             stage = function(entry)
