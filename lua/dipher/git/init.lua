@@ -142,6 +142,38 @@ function M.read(ref, root, relpath)
     return git({ "show", spec }, root) -- nil if the path is absent in that tree
 end
 
+-- one conflict stage's full content for `relpath`: 1=base, 2=ours, 3=theirs (§8.5).
+-- `git show :N:path`. an absent stage (a modify/delete conflict has no :2:/:3:) reads
+-- as "", mirroring M.read's nil->empty convention so the column renders an add/delete
+---@param root string
+---@param relpath string
+---@param stage 1|2|3
+---@return string
+function M.read_stage(root, relpath, stage)
+    return git({ "show", (":%d:"):format(stage) .. relpath }, root) or ""
+end
+
+-- repo-relative paths of the unmerged (conflicted) files, in git's order (§8.5)
+---@param root string
+---@return string[]
+function M.conflicted(root)
+    local out = git({ "diff", "--name-only", "--diff-filter=U", "-z" }, root)
+    return out and rev.parse_unmerged(out) or {}
+end
+
+-- whether `relpath` is currently conflicted
+---@param root string
+---@param relpath string
+---@return boolean
+function M.is_conflicted(root, relpath)
+    for _, p in ipairs(M.conflicted(root)) do
+        if p == relpath then
+            return true
+        end
+    end
+    return false
+end
+
 -- list changed files for a resolved source (used by the picker/panel, §8.6)
 ---@param source dipher.git.Source
 ---@param root string
