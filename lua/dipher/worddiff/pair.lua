@@ -55,11 +55,14 @@ function M.pair(old_lines, new_lines, threshold)
     local pairs_out = {}
     local used_new = {}
     for oi, ol in ipairs(old_lines) do
-        local best_ni, best_score = nil, threshold
+        local best_ni, best_score = nil, nil
         for ni, nl in ipairs(new_lines) do
             if not used_new[ni] then
                 local s = M.similarity(ol, nl)
-                if s >= best_score then
+                -- threshold gates eligibility; on ties keep the first (closest by
+                -- position) rather than letting later equal-scoring lines overwrite,
+                -- which mis-pairs e.g. `transcript string` to `statusContent string`
+                if s >= threshold and (best_score == nil or s > best_score) then
                     best_ni, best_score = ni, s
                 end
             end

@@ -24,6 +24,21 @@ describe("worddiff.pair.pair", function()
         assert.are.equal(2, p[2].new)
     end)
 
+    it("keeps the first partner on a similarity tie", function()
+        -- "transcript string" ties (0.5) against both new lines; the closer
+        -- "transcript transcript" must win over the later "statusContent string"
+        local p = pair.pair(
+            { "transcript string" },
+            { "transcript transcript", "statusContent string" },
+            0.5
+        )
+        assert.are.equal(1, p[1].old)
+        assert.are.equal(1, p[1].new)
+        -- the unmatched new line falls through as a pure insertion
+        assert.is_nil(p[2].old)
+        assert.are.equal(2, p[2].new)
+    end)
+
     it("leaves no-partner lines unpaired", function()
         local p = pair.pair({ "totally different" }, { "nothing alike here" }, 0.5)
         assert.is_nil(p[1].new)
