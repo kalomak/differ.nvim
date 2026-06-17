@@ -40,6 +40,24 @@ func TestGetFileVersions(t *testing.T) {
 	}
 }
 
+// HeadSHA resolves the live head (not the base) for the §7.5 TOCTOU guard.
+func TestHeadSHA(t *testing.T) {
+	c := newClient(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/pulls/3") {
+			return resp(200, prRefsREST, nil), nil
+		}
+		t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		return nil, nil
+	})
+	head, err := c.HeadSHA(context.Background(), "o", "r", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head != "headsha" {
+		t.Errorf("want head sha, got %q", head)
+	}
+}
+
 // pinned base/head shas (from get_pr) skip the prRefs round-trip: the /pulls/3
 // endpoint is never hit, and the blobs are fetched at the passed shas.
 func TestGetFileVersionsPinnedRefsSkipPrRefs(t *testing.T) {

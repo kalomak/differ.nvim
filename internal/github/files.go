@@ -46,6 +46,14 @@ func (c *Client) GetFileVersions(ctx context.Context, owner, repo string, number
 	return &FileVersions{Base: baseRes.blob, Head: headBlob}, nil
 }
 
+// HeadSHA resolves a PR's current head commit sha (via prRefs), for the §7.5 TOCTOU
+// guard: the mutate handlers compare it against the client's pinned expected_head and
+// reject with conflict if the head moved since the review was anchored.
+func (c *Client) HeadSHA(ctx context.Context, owner, repo string, number int) (string, error) {
+	_, head, err := c.prRefs(ctx, owner, repo, number)
+	return head, err
+}
+
 // prRefs resolves a PR's base and head commit SHAs via REST (lighter than the
 // get_pr GraphQL meta, which fetches the whole file list).
 func (c *Client) prRefs(ctx context.Context, owner, repo string, number int) (base, head string, err error) {

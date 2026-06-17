@@ -18,6 +18,8 @@ type postCommentParams struct {
 	StartLine int    `json:"start_line"`
 	InReplyTo string `json:"in_reply_to"`
 	ReviewID  string `json:"review_id"`
+	// the head sha the review was anchored against; gates the post on the §7.5 TOCTOU guard
+	ExpectedHead string `json:"expected_head"`
 }
 
 // postComment creates a review comment: a reply when in_reply_to is set, else a new
@@ -38,6 +40,9 @@ func (d Deps) postComment(ctx context.Context, params json.RawMessage) (any, err
 		if err := validateAnchor(p); err != nil {
 			return nil, err
 		}
+	}
+	if err := d.guardHead(ctx, p.Owner, p.Repo, p.Number, p.ExpectedHead); err != nil {
+		return nil, err
 	}
 	return d.GH.PostComment(ctx, p.Owner, p.Repo, p.Number, github.PostCommentInput{
 		Path:      p.Path,

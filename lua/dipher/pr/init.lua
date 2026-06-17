@@ -541,7 +541,7 @@ local function open_session(pr, detail, opts)
     session = {
         coords = { owner = pr.owner, repo = pr.repo },
         pr = pr,
-        -- head_sha is captured here; a later slice reads it for expected_head TOCTOU.
+        -- head_sha is captured here; the mutations send it as expected_head (§7.5 TOCTOU).
         -- body/author/state/draft/mergeable are carried so the overview (§8.2) renders
         -- without a refetch (the detail is already in hand)
         pr_meta = {

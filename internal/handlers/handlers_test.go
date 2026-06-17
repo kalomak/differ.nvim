@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -33,6 +34,9 @@ type mockAPI struct {
 	gotState     string
 	cleared      bool
 	called       bool
+	headSHA      string // the head HeadSHA returns (for the TOCTOU guard)
+	headErr      error
+	headCalled   bool
 }
 
 func (m *mockAPI) ListPRs(_ context.Context, _, _, filter string) ([]github.PR, error) {
@@ -54,6 +58,12 @@ func (m *mockAPI) GetFileVersions(_ context.Context, _, _ string, number int, pa
 	m.gotBase = base
 	m.gotHead = head
 	return &github.FileVersions{}, nil
+}
+
+func (m *mockAPI) HeadSHA(_ context.Context, _, _ string, number int) (string, error) {
+	m.headCalled = true
+	m.gotNumber = number
+	return m.headSHA, m.headErr
 }
 
 func (m *mockAPI) GetThreads(_ context.Context, _, _ string, number int) ([]github.Thread, error) {
@@ -156,6 +166,14 @@ func wantBadRequest(t *testing.T, err error) {
 	var pe *protocol.Error
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeBadRequest {
 		t.Fatalf("want bad_request, got %v", err)
+	}
+}
+
+func wantConflict(t *testing.T, err error) {
+	t.Helper()
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeConflict {
+		t.Fatalf("want conflict, got %v", err)
 	}
 }
 
@@ -354,6 +372,87 @@ func TestPostCommentReplyRoutes(t *testing.T) {
 	}
 	if m.gotComment.InReplyTo != "PRT_5" {
 		t.Errorf("reply not forwarded: %+v", m.gotComment)
+	}
+}
+
+// ── the §7.5 TOCTOU guard ───────────────────────────────────────────────────────
+// an anchored mutation pins expected_head; the handler resolves the live head and
+// rejects with conflict when it moved. an unpinned mutation skips the round-trip.
+
+const postCommentBody = `{"owner":"o","repo":"r","number":3,"path":"a.go","side":"RIGHT","line":8,"body":"nit","review_id":"PRR_1"%s}`
+
+func TestPostCommentSkipsHeadGuardWhenUnpinned(t *testing.T) {
+	m := &mockAPI{headSHA: "deadbeef"}
+	_, err := deps(m).postComment(context.Background(), json.RawMessage(fmt.Sprintf(postCommentBody, "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.headCalled {
+		t.Error("no expected_head should mean no head round-trip")
+	}
+	if m.gotComment.Body != "nit" {
+		t.Errorf("comment not posted: %+v", m.gotComment)
+	}
+}
+
+func TestPostCommentPassesHeadGuardOnMatch(t *testing.T) {
+	m := &mockAPI{headSHA: "abc123"}
+	_, err := deps(m).postComment(context.Background(), json.RawMessage(
+		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.headCalled {
+		t.Error("a pinned expected_head must trigger the head check")
+	}
+	if m.gotComment.Body != "nit" {
+		t.Errorf("a matching head should post the comment: %+v", m.gotComment)
+	}
+}
+
+func TestPostCommentConflictsOnMovedHead(t *testing.T) {
+	m := &mockAPI{headSHA: "moved"}
+	_, err := deps(m).postComment(context.Background(), json.RawMessage(
+		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`)))
+	wantConflict(t, err)
+	if m.gotComment.Body != "" {
+		t.Error("a moved head must reject before posting the comment")
+	}
+}
+
+// a head-check transport error surfaces rather than being swallowed into a post.
+func TestPostCommentPropagatesHeadError(t *testing.T) {
+	m := &mockAPI{headErr: protocol.NewError(protocol.CodeNetwork, "boom")}
+	_, err := deps(m).postComment(context.Background(), json.RawMessage(
+		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`)))
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNetwork {
+		t.Fatalf("want network error, got %v", err)
+	}
+	if m.gotComment.Body != "" {
+		t.Error("a failed head check must not post the comment")
+	}
+}
+
+func TestSubmitReviewConflictsOnMovedHead(t *testing.T) {
+	m := &mockAPI{headSHA: "moved"}
+	_, err := deps(m).submitReview(context.Background(), json.RawMessage(
+		`{"owner":"o","repo":"r","number":3,"review_id":"PRR_1","event":"APPROVE","body":"lgtm","expected_head":"abc123"}`))
+	wantConflict(t, err)
+	if m.gotReviewID != "" {
+		t.Error("a moved head must reject before submitting the review")
+	}
+}
+
+func TestSubmitReviewPassesHeadGuardOnMatch(t *testing.T) {
+	m := &mockAPI{headSHA: "abc123"}
+	_, err := deps(m).submitReview(context.Background(), json.RawMessage(
+		`{"owner":"o","repo":"r","number":3,"review_id":"PRR_1","event":"APPROVE","body":"lgtm","expected_head":"abc123"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.gotReviewID != "PRR_1" {
+		t.Error("a matching head should submit the review")
 	}
 }
 

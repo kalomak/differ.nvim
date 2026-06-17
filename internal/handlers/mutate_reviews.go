@@ -24,6 +24,8 @@ type submitReviewParams struct {
 	ReviewID string `json:"review_id"`
 	Event    string `json:"event"`
 	Body     string `json:"body"`
+	// the head sha the review was anchored against; gates the submit on the §7.5 TOCTOU guard
+	ExpectedHead string `json:"expected_head"`
 }
 
 // submitReview finalizes a pending review as one batch (§7.3).
@@ -40,6 +42,9 @@ func (d Deps) submitReview(ctx context.Context, params json.RawMessage) (any, er
 	}
 	if !validReviewEvent(p.Event) {
 		return nil, protocol.NewError(protocol.CodeBadRequest, "event must be APPROVE, REQUEST_CHANGES, or COMMENT")
+	}
+	if err := d.guardHead(ctx, p.Owner, p.Repo, p.Number, p.ExpectedHead); err != nil {
+		return nil, err
 	}
 	return d.GH.SubmitReview(ctx, p.ReviewID, p.Event, p.Body)
 }

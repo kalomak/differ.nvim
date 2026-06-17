@@ -26,6 +26,7 @@ type API interface {
 	ListPRs(ctx context.Context, owner, repo, filter string) ([]github.PR, error)
 	GetPR(ctx context.Context, owner, repo string, number int) (*github.PRDetail, error)
 	GetFileVersions(ctx context.Context, owner, repo string, number int, path, base, head string) (*github.FileVersions, error)
+	HeadSHA(ctx context.Context, owner, repo string, number int) (string, error)
 	GetThreads(ctx context.Context, owner, repo string, number int) ([]github.Thread, error)
 	GetTimeline(ctx context.Context, owner, repo string, number int) (*github.Timeline, error)
 	GetPendingReview(ctx context.Context, owner, repo string, number int) (*github.PendingReview, error)
@@ -69,6 +70,25 @@ func NewRegistry(d Deps) Registry {
 		"set_pr_state":       d.setPRState,
 		"cache_clear":        d.cacheClear,
 	}
+}
+
+// guardHead enforces the §7.5 TOCTOU guard: when the client pins expected (the head sha
+// it anchored the review against), resolve the PR's current head and reject with conflict
+// if it moved, so a comment never lands against a commit the user wasn't looking at. an
+// empty expected skips the check (the client didn't pin one); the §7.5 latency note keeps
+// this round-trip off the read hot path, so it costs one REST call per anchored mutation
+func (d Deps) guardHead(ctx context.Context, owner, repo string, number int, expected string) error {
+	if expected == "" {
+		return nil
+	}
+	head, err := d.GH.HeadSHA(ctx, owner, repo, number)
+	if err != nil {
+		return err
+	}
+	if head != expected {
+		return protocol.NewError(protocol.CodeConflict, "the PR head moved since the review was anchored; refresh and retry")
+	}
+	return nil
 }
 
 // decode unmarshals params into v, mapping malformed input to bad_request.
