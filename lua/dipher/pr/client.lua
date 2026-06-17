@@ -157,4 +157,31 @@ function M.delete_comment(pr, comment_id, cb)
     sidecar.request("delete_comment", with_pr(pr, { comment_id = comment_id }), cb)
 end
 
+-- get_checks result: {rollup, checks:[{name, status, conclusion, url, started_at?}]}.
+-- the status-check rollup plus each normalised check; read-only (§7.3)
+---@param pr { owner: string, repo: string, number: integer }
+---@param cb fun(err: table|nil, result: any)
+function M.get_checks(pr, cb)
+    sidecar.request("get_checks", with_pr(pr), cb)
+end
+
+-- merge_pr result: {merged, sha?}. args: method (squash|merge|rebase), delete_branch?,
+-- subject?, body?. the sidecar pre-checks mergeability and returns a `conflict` error
+-- rather than firing a doomed merge (§7.5), so the caller surfaces "not mergeable"
+---@param pr { owner: string, repo: string, number: integer }
+---@param args table  -- { method, delete_branch?, subject?, body? }
+---@param cb fun(err: table|nil, result: any)
+function M.merge_pr(pr, args, cb)
+    sidecar.request("merge_pr", with_pr(pr, args), cb)
+end
+
+-- set_pr_state result: {state}. transitions the lifecycle: state is ready|draft|closed|
+-- open and the result echoes the PR's condition after the transition (§7.3)
+---@param pr { owner: string, repo: string, number: integer }
+---@param state string  -- ready|draft|closed|open
+---@param cb fun(err: table|nil, result: any)
+function M.set_pr_state(pr, state, cb)
+    sidecar.request("set_pr_state", with_pr(pr, { state = state }), cb)
+end
+
 return M

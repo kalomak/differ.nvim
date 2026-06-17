@@ -80,6 +80,25 @@ function M.root(path)
     return out and chomp(out) or nil
 end
 
+-- check out a PR's head branch locally (§7.3 client-side action): fetch the ref from
+-- origin, then check it out. fetch first so the branch exists even before its first
+-- local pull; if a local branch of that name already tracks the ref, checkout lands on
+-- it. returns true on success, or false + the git stderr to surface
+---@param root string
+---@param ref string  -- the PR head branch name (head_ref)
+---@return boolean ok, string|nil err
+function M.checkout(root, ref)
+    local _, ferr = git({ "fetch", "origin", ref }, root)
+    if ferr then
+        return false, ferr
+    end
+    local _, cerr = git({ "checkout", ref }, root)
+    if cerr then
+        return false, cerr
+    end
+    return true
+end
+
 -- resolve an unresolved merge_base ref to a concrete rev; other refs pass through.
 -- returns nil on failure (e.g. unrelated histories), with a notification
 ---@param ref dipher.git.Ref

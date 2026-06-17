@@ -118,6 +118,36 @@ function M.pr(verb, arg)
         delete = function()
             pr.delete_comment()
         end,
+        -- the read-only CI checks view (§8.2)
+        checks = function()
+            pr.checks()
+        end,
+        -- lifecycle (§8.2): merge takes an optional method; ready/draft/close/reopen map
+        -- to a set_pr_state value; checkout/browser/url stay client-side (§7.3)
+        merge = function()
+            pr.merge(arg)
+        end,
+        checkout = function()
+            pr.checkout()
+        end,
+        ready = function()
+            pr.set_state("ready")
+        end,
+        draft = function()
+            pr.set_state("draft")
+        end,
+        close = function()
+            pr.set_state("close")
+        end,
+        reopen = function()
+            pr.set_state("reopen")
+        end,
+        browser = function()
+            pr.browser()
+        end,
+        url = function()
+            pr.url()
+        end,
     }
     local h = dispatch[verb]
     if h then
@@ -258,19 +288,33 @@ local VALUES = {
     log = { "base" },
 }
 
--- completion: subcommands at position 1, then that subcommand's value set
+-- third-level completion: a sub-verb's own argument values, keyed by subcommand then
+-- verb. `pr merge` takes a merge method (§8.2)
+---@type table<string, table<string, string[]>>
+local NESTED = {
+    pr = {
+        merge = { "squash", "merge", "rebase" },
+    },
+}
+
+-- completion: subcommands at token 2, that subcommand's value set at token 3, and a
+-- verb's own argument values at token 4 (e.g. `:Dipher pr merge <method>`). the token
+-- being completed is the last part when arglead is non-empty, else the next one
 ---@param arglead string
 ---@param cmdline string
 ---@return string[]
 function M.complete(arglead, cmdline)
     local parts = vim.split(vim.trim(cmdline), "%s+")
-    -- parts[1] == "Dipher"; completing the subcommand while on parts[2]
+    -- parts[1] == "Dipher"; the index of the token under completion
+    local idx = arglead ~= "" and #parts or (#parts + 1)
     local pool
-    if #parts < 2 or (#parts == 2 and arglead ~= "") then
+    if idx <= 2 then
         pool = vim.tbl_keys(SUB)
         pool[#pool + 1] = "base" -- the trunk diff shortcut isn't a SUB handler
-    else
+    elseif idx == 3 then
         pool = VALUES[parts[2]] or {}
+    else
+        pool = (NESTED[parts[2]] or {})[parts[3]] or {}
     end
     return vim.tbl_filter(function(c)
         return c:find(arglead, 1, true) == 1

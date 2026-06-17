@@ -708,6 +708,182 @@ function M.open(opts)
     end)
 end
 
+-- ── PR lifecycle (§8.2) ────────────────────────────────────────────────────────────
+
+-- lifecycle verb -> the set_pr_state value the sidecar expects (§7.3). pure, so the
+-- mapping is unit-tested; an unknown verb returns nil
+---@type table<string, string>
+local VERB_STATE = {
+    ready = "ready",
+    draft = "draft",
+    close = "closed",
+    reopen = "open",
+}
+
+-- merge and close mutate irreversibly, so they confirm first (§8.2); ready/draft/reopen
+-- are reversible and act without a prompt
+---@type table<string, true>
+local DESTRUCTIVE = { merge = true, close = true }
+
+---@type table<string, true>
+local MERGE_METHODS = { squash = true, merge = true, rebase = true }
+
+-- verb -> set_pr_state value, or nil for an unknown verb
+---@param verb string
+---@return string|nil
+function M.state_for_verb(verb)
+    return VERB_STATE[verb]
+end
+
+-- normalise a merge-method arg to a valid method, defaulting to squash (§8.2)
+---@param arg string|nil
+---@return string
+function M.merge_method(arg)
+    return (arg and MERGE_METHODS[arg]) and arg or "squash"
+end
+
+-- whether `verb` confirms before acting (merge/close)
+---@param verb string
+---@return boolean
+function M.is_destructive(verb)
+    return DESTRUCTIVE[verb] == true
+end
+
+-- a yes/no gate for destructive actions (§8.2). vim.fn.confirm blocks until answered;
+-- the default button is "No" so a stray <CR> never fires the action
+---@param prompt string
+---@param on_yes fun()
+local function confirm(prompt, on_yes)
+    if vim.fn.confirm(prompt, "&Yes\n&No", 2) == 1 then
+        on_yes()
+    end
+end
+
+---@return string
+local function pr_title()
+    return (session and session.pr_meta.title) or ("#" .. (session and session.pr.number or "?"))
+end
+
+-- :Dipher pr merge [squash|merge|rebase] — confirm, then merge with the chosen method.
+-- a `conflict` error means the Go side pre-check found the PR unmergeable; surface that
+-- rather than treating it as an internal failure. on success the PR is merged, so the
+-- session closes (its blobs are now history)
+---@param method_arg string|nil
+function M.merge(method_arg)
+    if not session then
+        return notify("open a PR first")
+    end
+    local method = M.merge_method(method_arg)
+    confirm(('merge "%s" via %s?'):format(pr_title(), method), function()
+        if not session then
+            return
+        end
+        client.merge_pr(session.pr, { method = method }, function(err, res)
+            if not session then
+                return -- session torn down while the merge was in flight
+            end
+            if err then
+                if err.code == "conflict" then
+                    return notify(
+                        "not mergeable: " .. (err.message or "merge blocked"),
+                        vim.log.levels.WARN
+                    )
+                end
+                return notify_err(err)
+            end
+            local sha = res and res.sha
+            notify(("merged" .. (sha and (" (" .. short(sha) .. ")") or "")))
+            session.pr_meta.state = "merged"
+            if session.panel and session.panel:is_open() then
+                session.panel:close() -- the PR is merged; end the session
+            end
+        end)
+    end)
+end
+
+-- :Dipher pr ready|draft|close|reopen — map the verb to a state and transition. close
+-- confirms (destructive); the reversible verbs act immediately. on success the session's
+-- cached state/draft flags follow the server's echoed state
+---@param verb string
+function M.set_state(verb)
+    if not session then
+        return notify("open a PR first")
+    end
+    local state = M.state_for_verb(verb)
+    if not state then
+        return notify("unknown lifecycle verb: " .. tostring(verb), vim.log.levels.WARN)
+    end
+    local function run()
+        client.set_pr_state(session.pr, state, function(err, res)
+            if not session then
+                return -- session torn down while the mutation was in flight
+            end
+            if err then
+                return notify_err(err)
+            end
+            local new_state = (res and res.state) or state
+            session.pr_meta.state = new_state
+            session.pr_meta.draft = new_state == "draft"
+            notify("pull request " .. new_state)
+        end)
+    end
+    if M.is_destructive(verb) then
+        confirm(('close "%s"?'):format(pr_title()), run)
+    else
+        run()
+    end
+end
+
+-- :Dipher pr checkout — local git on the session's head_ref (§7.3 client-side, no
+-- sidecar round-trip): fetch the ref + check it out via the local git plumbing
+function M.checkout()
+    if not session then
+        return notify("open a PR first")
+    end
+    local ref = session.pr_meta.head_ref
+    if not ref or ref == "" then
+        return notify("no head branch to check out", vim.log.levels.WARN)
+    end
+    local git = require("dipher.git")
+    local root = session.root or git.root(vim.fn.getcwd())
+    if not root then
+        return notify("not in a git repository", vim.log.levels.WARN)
+    end
+    local ok, err = git.checkout(root, ref)
+    if not ok then
+        return notify("checkout failed: " .. (err and vim.trim(err) or ref), vim.log.levels.ERROR)
+    end
+    notify("checked out " .. ref)
+end
+
+-- :Dipher pr browser — open the PR's html url in the system browser (§7.3 client-side,
+-- the `url` field from get_pr; no sidecar round-trip)
+function M.browser()
+    local url = session and session.pr_meta.url
+    if not url or url == "" then
+        return notify("no PR url", vim.log.levels.WARN)
+    end
+    vim.ui.open(url)
+end
+
+-- :Dipher pr url — yank the PR's html url to the system clipboard (§7.3 client-side)
+function M.url()
+    local url = session and session.pr_meta.url
+    if not url or url == "" then
+        return notify("no PR url", vim.log.levels.WARN)
+    end
+    vim.fn.setreg("+", url)
+    notify("yanked " .. url)
+end
+
+-- :Dipher pr checks — the read-only CI checks view (§8.2)
+function M.checks()
+    if not session then
+        return notify("open a PR first")
+    end
+    require("dipher.pr.checks").show(session)
+end
+
 -- M.resume(arg): reattach a pending review (§8.2). a number (or owner/repo#number)
 -- opens that PR then reattaches + restores position; no arg reattaches the currently
 -- open PR's draft. with no arg and no session, there's nothing to target
