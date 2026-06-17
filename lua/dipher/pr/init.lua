@@ -475,12 +475,6 @@ function M.review_status(bufnr)
     end
     return nil
 end
-function M.review()
-    if not session then
-        return notify("open a PR first")
-    end
-    require("dipher.pr.review").start(session)
-end
 function M.submit()
     if not session then
         return notify("open a PR first")
@@ -514,17 +508,24 @@ local function adopt_pending_review(pr)
     end)
 end
 
--- open the session tab + file panel for a fetched PR and land on the first file
+-- open the session tab for a fetched PR. the overview is the PR home, a panel-less
+-- pre-review page (§8.2); the file panel + diff (the review proper) build into the same
+-- tab only when the user enters the files. so the panel construction is deferred behind
+-- session.build_panel, called by the files landing and the overview's e/r
 ---@param pr { owner: string, repo: string, number: integer }
 ---@param detail table  -- get_pr result
----@param opts { after?: fun() }|nil
+---@param opts { after?: fun(), land?: string, review?: boolean }|nil
 local function open_session(pr, detail, opts)
     local entries = M.map_files(detail.files)
     if #entries == 0 then
         return notify("no changed files in this pull request")
     end
 
-    -- one panel at a time; opening a PR over an existing session closes it first
+    -- one session at a time; opening a PR over an existing one (a review panel or a
+    -- lingering overview page) closes it first
+    if session then
+        M.end_session()
+    end
     local Panel = require("dipher.panel")
     local existing = Panel.current()
     if existing and existing:is_open() then
@@ -539,25 +540,35 @@ local function open_session(pr, detail, opts)
     session = {
         coords = { owner = pr.owner, repo = pr.repo },
         pr = pr,
-        -- head_sha is captured here; a later slice reads it for expected_head TOCTOU
+        -- head_sha is captured here; a later slice reads it for expected_head TOCTOU.
+        -- body/author/state/draft/mergeable are carried so the overview (§8.2) renders
+        -- without a refetch (the detail is already in hand)
         pr_meta = {
             base_sha = detail.base_sha,
             head_sha = detail.head_sha,
             head_ref = detail.head_ref,
             url = detail.url,
             title = title,
+            body = detail.body,
+            author = detail.author,
+            state = detail.state,
+            draft = detail.draft,
+            mergeable = detail.mergeable,
         },
         root = require("dipher.git").root(vim.fn.getcwd()), -- optional; for jump-to-file
         entries = entries, -- flat FileEntry[] (single section), shared by ref with the panel
         versions = {}, -- per-path blob memo; valid for the session (shas are pinned)
         prefetching = {}, -- paths with an in-flight predictive prefetch (dedupe guard)
         threads = nil, -- PR-wide review threads (§6.4), fetched once by pr.threads.refresh
+        checks = nil, -- get_checks result, cached lazily by the overview (§8.2)
         thread_collapsed = {}, -- per thread_id collapse override (gc); nil = cursor-driven
         thread_active = nil, -- the anchor key (bufnr:row) the cursor expands (peek)
         review_id = nil, -- the active pending-review node id (§8.2); nil = immediate mode
         pending_focus = nil, -- one-shot { path, side, line } for resume position-restore
+        session_tab = session_tab, -- the tab hosting both the overview page and the review
+        overview_win = vim.api.nvim_get_current_win(), -- the page window (pre-panel)
         view = nil,
-        panel = nil,
+        panel = nil, -- nil until the user enters the files (build_panel below)
     }
 
     -- the pr-only viewed actions, bound on the pr surfaces only (§4.3, §8.2): toggle
@@ -609,46 +620,88 @@ local function open_session(pr, detail, opts)
         { spec = diff_km.delete_comment, fn = M.delete_comment, desc = "delete comment" },
     }
 
-    local panel = Panel.new({
-        sections = { { title = ("#%d %s"):format(pr.number, title), entries = entries } },
-        root = ("%s/%s"):format(pr.owner, pr.repo),
-        footer = detail.url or detail.head_ref,
-        keymaps = cfg.keymaps.panel,
-        extra_keymaps = panel_extra,
-        on_step = on_step,
-        listing = panel_cfg.listing,
-        position = panel_cfg.position,
-        height = panel_cfg.height,
-        width = panel_cfg.width,
-        progress = panel_cfg.progress,
-        on_select = function(entry)
-            show_file(entry)
-        end,
-        on_close = function()
-            require("dipher.pr.threads").close_peek() -- drop the split peek float, if open
-            if session and session.view and session.view:is_open() then
-                session.view:close()
-            end
-            close_session_tab(session_tab)
-            session = nil
-        end,
-    }):open()
-    panel.return_tab = return_tab
-    session.panel = panel
+    -- build the file panel + driven diff into the session tab. deferred so the overview
+    -- stays panel-less; a no-op once the panel exists (entering the files reuses it)
+    session.build_panel = function()
+        if session.panel then
+            return
+        end
+        local panel = Panel.new({
+            sections = { { title = ("#%d %s"):format(pr.number, title), entries = entries } },
+            root = ("%s/%s"):format(pr.owner, pr.repo),
+            footer = detail.url or detail.head_ref,
+            keymaps = cfg.keymaps.panel,
+            extra_keymaps = panel_extra,
+            on_step = on_step,
+            listing = panel_cfg.listing,
+            position = panel_cfg.position,
+            height = panel_cfg.height,
+            width = panel_cfg.width,
+            progress = panel_cfg.progress,
+            on_select = function(entry)
+                show_file(entry)
+            end,
+            on_close = function()
+                require("dipher.pr.threads").close_peek() -- drop the split peek float, if open
+                if session and session.view and session.view:is_open() then
+                    session.view:close()
+                end
+                close_session_tab(session_tab)
+                session = nil
+            end,
+        }):open()
+        panel.return_tab = return_tab
+        session.panel = panel
+    end
 
-    -- auto-select the first file, leaving the cursor in the diff (DiffviewOpen-style)
-    panel:select(true)
+    -- the overview lands first (pre-review page); the files landings build the panel and
+    -- open the first file's diff (DiffviewOpen-style)
+    if (opts and opts.land) == "overview" then
+        return require("dipher.pr.overview").open(session)
+    end
+
+    session.build_panel()
+    session.panel:select(true)
+    if opts and opts.review then
+        require("dipher.pr.review").start(session) -- review <n>: start the draft
+    end
+    -- adopt an existing draft once: review <n> already established it via start_review
+    -- (idempotent reattach), and resume reattaches in opts.after; otherwise detect one
     if opts and opts.after then
         opts.after() -- e.g. resume: reattach the pending draft + restore position
-    else
+    elseif not (opts and opts.review) then
         adopt_pending_review(pr)
     end
 end
 
--- M.show(pr): fetch the PR and open its session. opts.after runs once the session is
--- built (resume uses it to reattach the pending draft)
+-- enter the review proper (panel + diff) for the live session, building the panel on
+-- first entry or revealing it after a back-to-overview hop, then landing on the first
+-- file. used by the overview's e/r and by view/review re-entry on a live session
+---@param review boolean|nil
+local function enter_files(review)
+    if not session then
+        return
+    end
+    local first = not session.panel
+    if first then
+        session.build_panel()
+    elseif not session.panel:is_open() then
+        session.panel:show() -- revealing a sidebar hidden by a back-to-overview hop
+    end
+    require("dipher.pr.overview").disarm() -- the page window is the diff's now
+    session.panel:select(true)
+    if review then
+        require("dipher.pr.review").start(session) -- idempotent
+    elseif first then
+        adopt_pending_review(session.pr)
+    end
+end
+
+-- M.show(pr): fetch the PR and open its session. opts threads the landing target into
+-- open_session: land ("overview"|"files"), review (fire start_review after landing), and
+-- after (resume uses it to reattach the pending draft once the session is built)
 ---@param pr { owner: string, repo: string, number: integer }
----@param opts { after?: fun() }|nil
+---@param opts { after?: fun(), land?: string, review?: boolean }|nil
 function M.show(pr, opts)
     client.get_pr(pr, function(err, detail)
         if err then
@@ -659,10 +712,12 @@ function M.show(pr, opts)
 end
 
 -- present the list_prs picker. the one transient selector the PR flow still uses
--- (§8.2): a PR list is a genuine pick step with no obvious panel home
+-- (§8.2): a PR list is a genuine pick step with no obvious panel home. a pick lands on
+-- whichever `land` the caller chose (a bare list lands on the overview, view on files)
 ---@param coords { owner: string, repo: string }
 ---@param prs table[]
-local function pick(coords, prs)
+---@param land_opts { land?: string, review?: boolean }|nil
+local function pick(coords, prs, land_opts)
     vim.ui.select(prs, {
         prompt = "Select a pull request",
         ---@param pr table
@@ -680,21 +735,46 @@ local function pick(coords, prs)
         if not choice then
             return
         end
-        M.show({ owner = coords.owner, repo = coords.repo, number = choice.number })
+        M.show({ owner = coords.owner, repo = coords.repo, number = choice.number }, land_opts)
     end)
 end
 
+-- whether the live session already is this PR (same number + repo), so a re-entry can
+-- skip the refetch/rebuild and just move focus. an opts without coords matches the live
+-- repo (the overview's e/r passes only a number)
+---@param opts { number?: integer, coords?: { owner: string, repo: string } }
+---@return boolean
+local function session_matches(opts)
+    if not (session and opts.number and session.pr.number == opts.number) then
+        return false
+    end
+    if opts.coords then
+        return session.coords.owner == opts.coords.owner and session.coords.repo == opts.coords.repo
+    end
+    return true
+end
+
 -- M.open(opts): the entry point. resolve coords, then either jump straight to a known
--- PR number or list PRs and pick one
----@param opts { number?: integer, filter?: string, coords?: { owner: string, repo: string } }|nil
+-- PR number or list PRs and pick one. `land` selects the landing surface (default the
+-- overview home, §8.2); `review` fires start_review after landing on the files
+---@param opts { number?: integer, filter?: string, coords?: table, land?: string, review?: boolean }|nil
 function M.open(opts)
     opts = opts or {}
+    opts.land = opts.land or "overview"
+    -- already on this PR's session (the overview's e/r is the common case): enter the
+    -- files without a refetch/rebuild, building or revealing the panel as needed
+    if opts.land == "files" and session_matches(opts) then
+        return enter_files(opts.review)
+    end
     repo.resolve(opts, function(err, coords)
         if err then
             return notify_err(err)
         end
         if opts.number then
-            return M.show({ owner = coords.owner, repo = coords.repo, number = opts.number })
+            return M.show(
+                { owner = coords.owner, repo = coords.repo, number = opts.number },
+                { land = opts.land, review = opts.review }
+            )
         end
         client.list_prs(coords, opts.filter, function(lerr, prs)
             if lerr then
@@ -703,9 +783,67 @@ function M.open(opts)
             if not prs or #prs == 0 then
                 return notify("no pull requests for " .. coords.owner .. "/" .. coords.repo)
             end
-            pick(coords, prs)
+            pick(coords, prs, { land = opts.land, review = opts.review })
         end)
     end)
+end
+
+-- thin verb wrappers the command + overview keymaps call. view enters the file diff;
+-- review enters + starts a review. with no number they act on the active session (the
+-- overview's PR), so `:Dipher pr view`/`review` from the home enter that PR's files; with
+-- no number and no session, view falls to the picker
+---@param opts { number?: integer }|nil
+function M.view(opts)
+    local number = (opts and opts.number) or (session and session.pr.number)
+    return M.open({ number = number, land = "files" })
+end
+
+---@param opts { number?: integer }|nil
+function M.review(opts)
+    if opts and opts.number then
+        return M.open({ number = opts.number, land = "files", review = true })
+    end
+    if not session then
+        return notify("open a PR first")
+    end
+    -- no number: act on the active session. on the overview (no panel) enter the files
+    -- and start the review; already in the review, just start it (slice 4, no file jump)
+    if session.panel then
+        return require("dipher.pr.review").start(session)
+    end
+    return M.open({ number = session.pr.number, land = "files", review = true })
+end
+
+-- :Dipher pr overview — go back to the PR home from the review (closes the diff +
+-- hides the panel, keeping the session), or re-show it while already on the page
+function M.overview()
+    if not session then
+        return notify("open a PR first")
+    end
+    require("dipher.pr.overview").open(session)
+end
+
+-- the live session, exposed for pr/overview.lua (the module-local is nil after teardown)
+---@return table|nil
+function M.current_session()
+    return session
+end
+
+-- end the live session in either phase: the review panel's on_close closes the diff +
+-- tab, while a pre-review overview page just drops its window + tab. exposed for the
+-- overview page (its q and its navigate-away guard call it)
+function M.end_session()
+    if not session then
+        return
+    end
+    require("dipher.pr.overview").disarm()
+    require("dipher.pr.threads").close_peek()
+    if session.panel then
+        return session.panel:close() -- on_close closes the diff + tab and nils session
+    end
+    local tab = session.session_tab
+    session = nil
+    close_session_tab(tab)
 end
 
 -- ── PR lifecycle (§8.2) ────────────────────────────────────────────────────────────

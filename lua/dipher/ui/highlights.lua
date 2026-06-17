@@ -33,6 +33,9 @@ local LINKS = {
     -- the ref-decoration tag in branch-range mode
     dipherHistoryAuthor = { link = "Identifier" },
     dipherHistoryRef = { link = "Special" },
+    -- overview page (§8.2): the title rides the theme Title; the meta/body/verdict/author
+    -- groups are palette-derived in overview_groups
+    dipherOverviewTitle = { link = "Title" },
 }
 
 -- the first defined fg among `groups`, else `fallback` (a 0xRRGGBB int). lets the
@@ -141,6 +144,21 @@ local function thread_groups(p)
     }
 end
 
+-- overview page groups (§8.2): the meta chrome is dim, the body keeps Normal, and the
+-- verdict + author groups ride the palette (approved green, requested-changes orange,
+-- author blue) so a review verdict reads at a glance. the title links Title in LINKS
+---@param p table<string, integer>
+---@return table<string, vim.api.keyset.highlight>
+local function overview_groups(p)
+    return {
+        dipherOverviewMeta = { fg = p.grey },
+        dipherOverviewBody = {}, -- fg unset -> Normal
+        dipherOverviewApproved = { fg = p.green },
+        dipherOverviewChanges = { fg = p.orange },
+        dipherOverviewAuthor = { fg = p.blue },
+    }
+end
+
 -- coherent two-tone diff backgrounds: a quiet line tint and a richer same-hue word
 -- patch, both blended from one vivid colour per side (the add/delete fg) over the
 -- editor bg. deriving line and patch from the same source keeps the hue identical
@@ -167,8 +185,15 @@ end
 -- palette so it tracks theme changes
 local function apply()
     local p = palette()
-    local groups =
-        vim.tbl_extend("error", {}, LINKS, status_groups(p), diff_bg_groups(p), thread_groups(p))
+    local groups = vim.tbl_extend(
+        "error",
+        {},
+        LINKS,
+        status_groups(p),
+        diff_bg_groups(p),
+        thread_groups(p),
+        overview_groups(p)
+    )
     for name, val in pairs(groups) do
         vim.api.nvim_set_hl(0, name, vim.tbl_extend("keep", { default = true }, val))
     end

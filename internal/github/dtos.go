@@ -139,6 +139,31 @@ type pendingReviewGQL struct {
 	} `json:"repository"`
 }
 
+// timelineGQL is the get_timeline response: PR conversation comments (paginated) and
+// the review verdicts. reviews carry submittedAt (null on the viewer's PENDING draft).
+type timelineGQL struct {
+	Repository struct {
+		PullRequest struct {
+			Comments struct {
+				Nodes []struct {
+					Author    loginDTO `json:"author"`
+					Body      string   `json:"body"`
+					CreatedAt string   `json:"createdAt"`
+				} `json:"nodes"`
+				PageInfo pageInfoGQL `json:"pageInfo"`
+			} `json:"comments"`
+			Reviews struct {
+				Nodes []struct {
+					Author      loginDTO `json:"author"`
+					State       string   `json:"state"`
+					Body        string   `json:"body"`
+					SubmittedAt string   `json:"submittedAt"`
+				} `json:"nodes"`
+			} `json:"reviews"`
+		} `json:"pullRequest"`
+	} `json:"repository"`
+}
+
 // checksGQL is the get_checks GraphQL response: the rollup on the PR's head commit.
 // statusCheckRollup is null when no checks are configured.
 type checksGQL struct {

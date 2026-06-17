@@ -454,6 +454,13 @@ function Panel:set_all_folds(collapsed)
     end
 end
 
+-- the main content window the panel drives (where diffs and the overview page open),
+-- carving a fresh split off the panel if none survives. exposed for the pr overview
+---@return integer
+function Panel:content_win()
+    return self:_ensure_origin()
+end
+
 -- a non-panel window to open diffs in: the origin window if still valid, else any
 -- other window, else a fresh split carved off the panel
 ---@return integer

@@ -27,6 +27,7 @@ type API interface {
 	GetPR(ctx context.Context, owner, repo string, number int) (*github.PRDetail, error)
 	GetFileVersions(ctx context.Context, owner, repo string, number int, path, base, head string) (*github.FileVersions, error)
 	GetThreads(ctx context.Context, owner, repo string, number int) ([]github.Thread, error)
+	GetTimeline(ctx context.Context, owner, repo string, number int) (*github.Timeline, error)
 	GetPendingReview(ctx context.Context, owner, repo string, number int) (*github.PendingReview, error)
 	GetChecks(ctx context.Context, owner, repo string, number int) (*github.Checks, error)
 	StartReview(ctx context.Context, owner, repo string, number int) (*github.StartReview, error)
@@ -54,6 +55,7 @@ func NewRegistry(d Deps) Registry {
 		"get_pr":             d.getPR,
 		"get_file_versions":  d.getFileVersions,
 		"get_threads":        d.getThreads,
+		"get_timeline":       d.getTimeline,
 		"get_pending_review": d.getPendingReview,
 		"get_checks":         d.getChecks,
 		"start_review":       d.startReview,

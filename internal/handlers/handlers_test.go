@@ -62,6 +62,12 @@ func (m *mockAPI) GetThreads(_ context.Context, _, _ string, number int) ([]gith
 	return nil, nil
 }
 
+func (m *mockAPI) GetTimeline(_ context.Context, _, _ string, number int) (*github.Timeline, error) {
+	m.called = true
+	m.gotNumber = number
+	return &github.Timeline{}, nil
+}
+
 func (m *mockAPI) GetPendingReview(_ context.Context, _, _ string, number int) (*github.PendingReview, error) {
 	m.called = true
 	m.gotNumber = number

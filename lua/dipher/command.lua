@@ -98,10 +98,20 @@ function M.pr(verb, arg)
         resolve = function()
             pr.resolve()
         end,
+        -- the file-entry verbs (§8.2): view enters the diff read-only, review enters +
+        -- starts a review. a number opens that PR fresh; no number reuses the active
+        -- session (review with no number starts a draft on it)
+        view = function()
+            pr.view({ number = arg and tonumber(arg) })
+        end,
         -- the review-authoring loop (§8.2): start a draft, submit/discard it, resume a
         -- pending draft, or reply to the thread under the cursor
         review = function()
-            pr.review()
+            pr.review({ number = arg and tonumber(arg) })
+        end,
+        -- refocus the overview home (the PR landing page) from within the file diff
+        overview = function()
+            pr.overview()
         end,
         submit = function()
             pr.submit()
@@ -156,8 +166,14 @@ function M.pr(verb, arg)
     notify("unknown `pr` subcommand: " .. verb, vim.log.levels.WARN)
 end
 
--- :Dipher close: close the panel + diff view (the whole local session)
+-- :Dipher close: end the active session. a live PR session (the pre-review overview
+-- page, which has no panel for git.close to catch, or the review proper) ends through
+-- its own teardown; otherwise close the local git diff session
 function M.close()
+    local pr = require("dipher.pr")
+    if pr.current_session() then
+        return pr.end_session()
+    end
     require("dipher.git").close()
 end
 
@@ -266,6 +282,8 @@ local VALUES = {
     -- later slices implement these sub-verbs; listing now keeps completion stable
     pr = {
         "list",
+        "view",
+        "overview",
         "delete",
         "resolve",
         "reply",

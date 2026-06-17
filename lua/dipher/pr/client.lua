@@ -90,6 +90,15 @@ function M.resolve_thread(pr, thread_id, resolved, cb)
     }, cb)
 end
 
+-- get_timeline result: {comments:[{author, body, created_at}], reviews:[{author,
+-- state, body, created_at}]}. PR-level conversation comments + submitted review
+-- verdicts (§3 keeps reactions/labels/events out); the overview builder merges + sorts
+---@param pr { owner: string, repo: string, number: integer }
+---@param cb fun(err: table|nil, result: any)
+function M.get_timeline(pr, cb)
+    sidecar.request("get_timeline", { owner = pr.owner, repo = pr.repo, number = pr.number }, cb)
+end
+
 -- the flat pr coords every review/comment call sends (the sidecar decodes owner/repo/
 -- number at the top level), merged with the call's own args
 ---@param pr { owner: string, repo: string, number: integer }

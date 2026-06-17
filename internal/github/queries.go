@@ -95,6 +95,33 @@ query GetPendingReview($owner: String!, $repo: String!, $number: Int!) {
   }
 }`
 
+// getTimelineQuery fetches the PR's conversation comments and submitted reviews —
+// the two timeline ingredients get_pr/get_threads don't carry. reviews include the
+// viewer's PENDING draft, filtered out in GetTimeline (it isn't a timeline entry).
+const getTimelineQuery = `
+query GetTimeline($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      comments(first: 100, after: $cursor) {
+        nodes {
+          author { login }
+          body
+          createdAt
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+      reviews(first: 100) {
+        nodes {
+          author { login }
+          state
+          body
+          submittedAt
+        }
+      }
+    }
+  }
+}`
+
 // getChecksQuery fetches the status-check rollup for the PR's head commit. contexts
 // is a union of CheckRun (modern checks) and StatusContext (legacy commit statuses);
 // both are normalised to a common shape in checks.go.

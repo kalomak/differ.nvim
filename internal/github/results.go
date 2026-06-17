@@ -115,6 +115,32 @@ type Check struct {
 	StartedAt  string `json:"started_at,omitempty"`
 }
 
+// Timeline is the get_timeline result: PR conversation comments and submitted review
+// verdicts, the minimal timeline the overview page interleaves (§3 keeps reactions /
+// labels / events out). the frontend merges + sorts the two lists by created_at.
+type Timeline struct {
+	Comments []TimelineComment `json:"comments"`
+	Reviews  []ReviewSummary   `json:"reviews"`
+}
+
+// TimelineComment is one PR-level conversation comment (an IssueComment, not a review
+// thread comment).
+type TimelineComment struct {
+	Author    string `json:"author"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+}
+
+// ReviewSummary is one submitted review verdict. State is APPROVED / CHANGES_REQUESTED
+// / COMMENTED / DISMISSED; Body is the review's summary text (may be empty). CreatedAt
+// is submittedAt.
+type ReviewSummary struct {
+	Author    string `json:"author"`
+	State     string `json:"state"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
+}
+
 // PostCommentInput carries the post_comment params into the github layer. InReplyTo
 // (a thread node id) selects the reply path; otherwise a new thread is opened, as a
 // draft when ReviewID is set or immediately when it isn't. Side/StartSide are

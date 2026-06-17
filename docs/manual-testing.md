@@ -93,3 +93,21 @@ from inside the test repo's worktree:
 - `:Dipher close` tears the session down and returns to the invoking tab
 - error paths surface one notification: no token (`gh auth login`), no gh
   (`install gh or set GH_TOKEN`), a non-github remote (`not a github remote`)
+
+### slice 6 — overview home + minimal timeline
+
+- `:Dipher pr <n>` (and a `:Dipher pr list` pick) lands on the overview home — a
+  pre-review page filling the session tab with **no file panel** (the panel belongs to
+  the review proper): the title/state/author/mergeable header, a `checks: … · threads:
+  N unresolved / M` line, the PR body, then the timeline
+- from the overview, `e` enters the review (builds the panel + diff in the same tab),
+  `r` enters + starts a review, `q`/`<Esc>` backs out of the PR (ends the session)
+- `:Dipher pr view <n>` skips the overview and lands straight on the first file
+  (read-only); `:Dipher pr review <n>` lands on the first file with a review started
+- `:Dipher pr overview` from within the review goes back to the home page: the diff
+  closes and the panel hides (the session stays live); `e`/`r` re-enter, reopening the
+  panel + diff without a refetch
+- a real PR with conversation comments + an approval + a changes-requested review
+  renders them in chronological order, verdicts coloured (approved green, requested
+  changes orange); the viewer's pending draft and bare commented reviews don't appear
+- `gx`/`<CR>` opens the PR in the browser
