@@ -32,6 +32,7 @@ local REGION_HL = {
 ---@field bufs integer[]                  -- the scratch input buffers (deleted on close)
 ---@field return_tab integer
 ---@field session_tab integer
+---@field diag_aug integer|nil            -- the DiagnosticChanged hook that hushes the result
 
 ---@type dipher.MergeSession|nil
 local session = nil
@@ -48,23 +49,35 @@ function M.current()
     return session
 end
 
--- toggle diagnostics for the result buffer. it's the real file, so the user's LSP/linter
--- attaches and floods it with errors over the conflict markers (invalid source); silence
--- them while resolving, restore on close. tolerant of the 0.10 enable(bool, filter) and
--- the older enable/disable(bufnr) signatures
+-- the result is the real file, so the user's LSP/linter parses it and reports errors over
+-- the conflict markers (invalid source). just toggling display (enable/disable) leaves the
+-- diagnostics stored, so they still leak through hover floats and the loc/qf list — clear
+-- them outright and keep them cleared as the producers re-publish (DiagnosticChanged),
+-- until the session closes. returns the augroup id so close can drop the hook
 ---@param buf integer
----@param on boolean
-local function set_diagnostics(buf, on)
+---@return integer|nil augroup
+local function suppress_diagnostics(buf)
     if not vim.diagnostic then
-        return
+        return nil
     end
-    if not pcall(vim.diagnostic.enable, on, { bufnr = buf }) then
-        if on then
-            pcall(vim.diagnostic.enable, buf)
-        else
-            pcall(vim.diagnostic.disable, buf)
+    local clearing = false
+    local function clear()
+        -- guard re-entry (reset itself fires DiagnosticChanged) and skip when already empty
+        if clearing or #vim.diagnostic.get(buf) == 0 then
+            return
         end
+        clearing = true
+        vim.diagnostic.reset(nil, buf) -- all namespaces for this buffer
+        clearing = false
     end
+    clear()
+    local aug = vim.api.nvim_create_augroup("dipher.merge.diag." .. buf, { clear = true })
+    vim.api.nvim_create_autocmd("DiagnosticChanged", {
+        group = aug,
+        buffer = buf,
+        callback = clear,
+    })
+    return aug
 end
 
 -- a scratch buffer for one column: the side's content, named + filetyped so native
@@ -232,8 +245,9 @@ function M.close()
     end
     local s = session
     session = nil
-    if vim.api.nvim_buf_is_valid(s.result_buf) then
-        set_diagnostics(s.result_buf, true) -- restore the file's normal diagnostics
+    -- drop the diagnostics hook; the producers re-lint the now-resolved file on their own
+    if s.diag_aug then
+        pcall(vim.api.nvim_del_augroup_by_id, s.diag_aug)
     end
     for _, buf in ipairs(s.bufs) do
         if vim.api.nvim_buf_is_valid(buf) then
@@ -284,7 +298,6 @@ local function lay_out(root, relpath, model, layout)
                 vim.cmd.edit(vim.fn.fnameescape(abs))
             end)
             result_buf = vim.api.nvim_win_get_buf(result_win)
-            set_diagnostics(result_buf, false) -- the markers aren't valid source; hush the LSP
             paint(result_buf, col.regions, REGION_HL.result)
         else
             local buf = make_buffer(col.side, relpath, col.lines)
@@ -317,6 +330,7 @@ local function lay_out(root, relpath, model, layout)
         bufs = bufs,
         return_tab = return_tab,
         session_tab = session_tab,
+        diag_aug = suppress_diagnostics(result_buf), -- the markers aren't valid source
     }
 
     -- nav + take-this resolution live on the result buffer (the working surface), from
