@@ -84,6 +84,50 @@ describe("command base shortcut", function()
     end)
 end)
 
+describe("command bare dispatch reroute", function()
+    -- stub root + conflicted so the routing is checked without a repo; record which
+    -- surface dispatch reaches
+    local function run(args, conflicted)
+        local git = require("dipher.git")
+        local merge = require("dipher.merge")
+        local sr, sc, sp, so = git.root, git.conflicted, git.panel, merge.open
+        local routed = {}
+        git.root = function()
+            return "/repo"
+        end
+        git.conflicted = function()
+            return conflicted
+        end
+        git.panel = function()
+            routed.panel = true
+        end
+        merge.open = function()
+            routed.merge = true
+        end
+        command.dispatch(args)
+        git.root, git.conflicted, git.panel, merge.open = sr, sc, sp, so
+        return routed
+    end
+
+    it("routes bare :Dipher to the merge tool when the tree has conflicts", function()
+        local routed = run({}, { "f.txt" })
+        assert.is_true(routed.merge)
+        assert.is_nil(routed.panel)
+    end)
+
+    it("opens the diff panel when there are no conflicts", function()
+        local routed = run({}, {})
+        assert.is_true(routed.panel)
+        assert.is_nil(routed.merge)
+    end)
+
+    it("never reroutes :Dipher <rev>, even mid-conflict", function()
+        local routed = run({ "main..." }, { "f.txt" })
+        assert.is_true(routed.panel)
+        assert.is_nil(routed.merge)
+    end)
+end)
+
 describe("command panel", function()
     it("always opens with a file shown (open_first), so there's a diff window", function()
         local git = require("dipher.git")

@@ -280,11 +280,22 @@ local SUB = {
     cache = M.cache,
 }
 
+-- whether the working tree the current buffer (or cwd) sits in has conflicted files
+---@return boolean
+local function has_conflicts()
+    local git = require("dipher.git")
+    local file = vim.api.nvim_buf_get_name(0)
+    local anchor = (file ~= "" and vim.fn.filereadable(file) == 1) and file or vim.fn.getcwd()
+    local root = git.root(anchor)
+    return root ~= nil and #git.conflicted(root) > 0
+end
+
 -- route `:Dipher ...`. a recognised subcommand (layout/context/panel) takes its
 -- arg; `base` is the trunk shortcut → the whole branch vs base (`<base>...`, incl.
 -- uncommitted); anything else, including no args, is a local-diff rev spec (§8.1),
 -- so `:Dipher`, `:Dipher main...`, `:Dipher a..b` open the file panel over that
--- change set and show the first file's diff (DiffviewOpen-style)
+-- change set and show the first file's diff (DiffviewOpen-style). the exception: bare
+-- `:Dipher` mid-conflict opens the merge tool instead (§8.5)
 ---@param fargs string[]
 function M.dispatch(fargs)
     local handler = fargs[1] and SUB[fargs[1]]
@@ -301,6 +312,12 @@ function M.dispatch(fargs)
             open_first = true,
             supersede = true,
         })
+    end
+    -- bare `:Dipher` during a conflicted merge routes to the merge tool (§8.5) — that's
+    -- the "help me resolve this" moment. only the no-arg form reroutes; `:Dipher <rev>`
+    -- still opens that diff. the merge tool picks the target (current/sole/picker)
+    if not fargs[1] and has_conflicts() then
+        return require("dipher.merge").open({})
     end
     -- `:Dipher <rev>` is idempotent: re-running it over a live session opens the new diff
     -- and closes the previous one (supersede), rather than toggling the sidebar

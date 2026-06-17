@@ -48,6 +48,25 @@ function M.current()
     return session
 end
 
+-- toggle diagnostics for the result buffer. it's the real file, so the user's LSP/linter
+-- attaches and floods it with errors over the conflict markers (invalid source); silence
+-- them while resolving, restore on close. tolerant of the 0.10 enable(bool, filter) and
+-- the older enable/disable(bufnr) signatures
+---@param buf integer
+---@param on boolean
+local function set_diagnostics(buf, on)
+    if not vim.diagnostic then
+        return
+    end
+    if not pcall(vim.diagnostic.enable, on, { bufnr = buf }) then
+        if on then
+            pcall(vim.diagnostic.enable, buf)
+        else
+            pcall(vim.diagnostic.disable, buf)
+        end
+    end
+end
+
 -- a scratch buffer for one column: the side's content, named + filetyped so native
 -- syntax highlights it (these are whole, valid source files, unlike the diff buffers),
 -- locked read-only for this slice
@@ -213,6 +232,9 @@ function M.close()
     end
     local s = session
     session = nil
+    if vim.api.nvim_buf_is_valid(s.result_buf) then
+        set_diagnostics(s.result_buf, true) -- restore the file's normal diagnostics
+    end
     for _, buf in ipairs(s.bufs) do
         if vim.api.nvim_buf_is_valid(buf) then
             pcall(vim.api.nvim_buf_delete, buf, { force = true })
@@ -262,6 +284,7 @@ local function lay_out(root, relpath, model, layout)
                 vim.cmd.edit(vim.fn.fnameescape(abs))
             end)
             result_buf = vim.api.nvim_win_get_buf(result_win)
+            set_diagnostics(result_buf, false) -- the markers aren't valid source; hush the LSP
             paint(result_buf, col.regions, REGION_HL.result)
         else
             local buf = make_buffer(col.side, relpath, col.lines)
