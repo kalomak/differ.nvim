@@ -350,8 +350,9 @@ function M.prev_thread()
     nav_thread("prev")
 end
 
--- gr / :Dipher pr resolve: toggle the resolved state of the thread under the cursor.
--- optimistic — flip + re-apply (highlight swap) immediately, then reconcile to the
+-- gr: toggle the resolved state of the thread under the cursor (a cursor-context keymap,
+-- not an ex-command). optimistic — flip + re-apply (highlight swap) immediately, then
+-- reconcile to the
 -- server's returned state, rolling back + flagging on error (§11). one line can stack
 -- several threads, so it acts on the first open one (else the first, to unresolve);
 -- the sidecar flushes its thread cache after the mutation (§7.5)
@@ -477,13 +478,13 @@ function M.review_status(bufnr)
 end
 function M.submit()
     if not session then
-        return notify("open a PR first")
+        return notify("no active pull request")
     end
     require("dipher.pr.review").submit(session)
 end
 function M.discard_review()
     if not session then
-        return notify("open a PR first")
+        return notify("no active pull request")
     end
     require("dipher.pr.review").discard(session)
 end
@@ -502,7 +503,7 @@ local function adopt_pending_review(pr)
         if type(review_id) == "string" and review_id ~= "" then
             session.review_id = review_id
             notify(
-                "you have a pending review here — comments are drafts (:Dipher pr resume to manage)"
+                "you have a pending review here — comments are drafts (:Dipher pr review resume to manage)"
             )
         end
     end)
@@ -804,7 +805,7 @@ function M.review(opts)
         return M.open({ number = opts.number, land = "files", review = true })
     end
     if not session then
-        return notify("open a PR first")
+        return notify("no active pull request")
     end
     -- no number: act on the active session. on the overview (no panel) enter the files
     -- and start the review; already in the review, just start it (slice 4, no file jump)
@@ -817,16 +818,30 @@ end
 -- :Dipher pr overview — go back to the PR home from the review (closes the diff +
 -- hides the panel, keeping the session), or re-show it while already on the page
 function M.overview()
-    if not session then
-        return notify("open a PR first")
-    end
-    require("dipher.pr.overview").open(session)
+    M.with_session(function(s)
+        require("dipher.pr.overview").open(s)
+    end)
 end
 
 -- the live session, exposed for pr/overview.lua (the module-local is nil after teardown)
 ---@return table|nil
 function M.current_session()
     return session
+end
+
+-- run fn with the active session, or notify and bail. the single gate the synchronous
+-- session-context verbs (checks / overview / checkout / share) pass through, so "no active
+-- pull request" reads the same everywhere. a session counts as active in either phase, the
+-- panel-less overview page or the review proper, so the guard is just session presence (the
+-- overview's verbs run before any panel exists). openers (open/view/review <n>) don't use
+-- this: they create the session. the async-mutating verbs (merge / set_state / review
+-- actions) keep their own guard so their in-flight teardown re-checks stay module-local
+---@param fn fun(session: table)
+function M.with_session(fn)
+    if not session then
+        return notify("no active pull request")
+    end
+    fn(session)
 end
 
 -- end the live session in either phase: the review panel's on_close closes the diff +
@@ -909,7 +924,7 @@ end
 ---@param method_arg string|nil
 function M.merge(method_arg)
     if not session then
-        return notify("open a PR first")
+        return notify("no active pull request")
     end
     local method = M.merge_method(method_arg)
     confirm(('merge "%s" via %s?'):format(pr_title(), method), function()
@@ -945,7 +960,7 @@ end
 ---@param verb string
 function M.set_state(verb)
     if not session then
-        return notify("open a PR first")
+        return notify("no active pull request")
     end
     local state = M.state_for_verb(verb)
     if not state then
@@ -975,51 +990,56 @@ end
 -- :Dipher pr checkout — local git on the session's head_ref (§7.3 client-side, no
 -- sidecar round-trip): fetch the ref + check it out via the local git plumbing
 function M.checkout()
-    if not session then
-        return notify("open a PR first")
-    end
-    local ref = session.pr_meta.head_ref
-    if not ref or ref == "" then
-        return notify("no head branch to check out", vim.log.levels.WARN)
-    end
-    local git = require("dipher.git")
-    local root = session.root or git.root(vim.fn.getcwd())
-    if not root then
-        return notify("not in a git repository", vim.log.levels.WARN)
-    end
-    local ok, err = git.checkout(root, ref)
-    if not ok then
-        return notify("checkout failed: " .. (err and vim.trim(err) or ref), vim.log.levels.ERROR)
-    end
-    notify("checked out " .. ref)
+    M.with_session(function(s)
+        local ref = s.pr_meta.head_ref
+        if not ref or ref == "" then
+            return notify("no head branch to check out", vim.log.levels.WARN)
+        end
+        local git = require("dipher.git")
+        local root = s.root or git.root(vim.fn.getcwd())
+        if not root then
+            return notify("not in a git repository", vim.log.levels.WARN)
+        end
+        local ok, err = git.checkout(root, ref)
+        if not ok then
+            return notify(
+                "checkout failed: " .. (err and vim.trim(err) or ref),
+                vim.log.levels.ERROR
+            )
+        end
+        notify("checked out " .. ref)
+    end)
 end
 
 -- :Dipher pr browser — open the PR's html url in the system browser (§7.3 client-side,
 -- the `url` field from get_pr; no sidecar round-trip)
 function M.browser()
-    local url = session and session.pr_meta.url
-    if not url or url == "" then
-        return notify("no PR url", vim.log.levels.WARN)
-    end
-    vim.ui.open(url)
+    M.with_session(function(s)
+        local url = s.pr_meta.url
+        if not url or url == "" then
+            return notify("no PR url", vim.log.levels.WARN)
+        end
+        vim.ui.open(url)
+    end)
 end
 
 -- :Dipher pr url — yank the PR's html url to the system clipboard (§7.3 client-side)
 function M.url()
-    local url = session and session.pr_meta.url
-    if not url or url == "" then
-        return notify("no PR url", vim.log.levels.WARN)
-    end
-    vim.fn.setreg("+", url)
-    notify("yanked " .. url)
+    M.with_session(function(s)
+        local url = s.pr_meta.url
+        if not url or url == "" then
+            return notify("no PR url", vim.log.levels.WARN)
+        end
+        vim.fn.setreg("+", url)
+        notify("yanked " .. url)
+    end)
 end
 
 -- :Dipher pr checks — the read-only CI checks view (§8.2)
 function M.checks()
-    if not session then
-        return notify("open a PR first")
-    end
-    require("dipher.pr.checks").show(session)
+    M.with_session(function(s)
+        require("dipher.pr.checks").show(s)
+    end)
 end
 
 -- M.resume(arg): reattach a pending review (§8.2). a number (or owner/repo#number)
@@ -1051,7 +1071,7 @@ function M.resume(arg)
         end)
     end
     if not session then
-        return notify("open a PR first, or pass a number: :Dipher pr resume <number>")
+        return notify("no active pull request — open one with :Dipher pr review <number>")
     end
     require("dipher.pr.review").reattach(session)
 end

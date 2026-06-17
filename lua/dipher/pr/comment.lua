@@ -145,7 +145,7 @@ function M.reply(session)
     M.compose(session, { in_reply_to = anchor.threads[1].thread_id, anchor_win = win })
 end
 
--- gx / :Dipher pr delete — delete the most recent comment of the thread under the
+-- gx: delete the most recent comment of the thread under the
 -- cursor (usually a draft you just wrote). deleting the only/root comment removes the
 -- whole thread; a later comment deletes just that reply. confirms first (destructive),
 -- then re-fetches so the overlay updates

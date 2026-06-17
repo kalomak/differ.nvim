@@ -74,94 +74,105 @@ function M.panel(arg)
     require("dipher.git").panel({ rev = (arg ~= "" and arg) or nil, open_first = true })
 end
 
--- :Dipher pr [number|owner/repo#number|list [filter]] (§8.2). no arg or a bare
--- number opens the picker / that PR; `owner/repo#number` targets a specific repo
--- (forks, §1); `list [filter]` opens the picker with a filter; `resolve` toggles the
--- review thread under the cursor (§6.4). the review/submit/… sub-verbs arrive later
+local pr = function()
+    return require("dipher.pr")
+end
+
+-- the opener + session-context verb handlers, each taking the trailing arg (may be nil).
+-- openers (list/view/review <n>) forward an optional number and establish/switch the
+-- session; every other verb ignores args and acts on the one active session via the verb's
+-- own pr.with_session gate. cursor-context gestures (resolve/reply/delete) are not here:
+-- they're keymaps (gr/gp/gx, §6.4/§8.2), not ex-commands
+---@type table<string, fun(arg: string|nil)>
+local PR_VERBS = {
+    list = function(arg)
+        pr().open({ filter = arg or "open" })
+    end,
+    -- view enters the diff read-only on PR n, else the active session (§8.2)
+    view = function(arg)
+        pr().view({ number = arg and tonumber(arg) or nil })
+    end,
+    review = function(arg)
+        M.pr_review(arg)
+    end,
+    -- refocus the overview home (the PR landing page) from within the file diff
+    overview = function()
+        pr().overview()
+    end,
+    -- the read-only CI checks view (§8.2)
+    checks = function()
+        pr().checks()
+    end,
+    -- lifecycle (§8.2): merge takes an optional method; ready/draft/close/reopen map to a
+    -- set_pr_state value; checkout/browser/url stay client-side (§7.3)
+    merge = function(arg)
+        pr().merge(arg)
+    end,
+    checkout = function()
+        pr().checkout()
+    end,
+    ready = function()
+        pr().set_state("ready")
+    end,
+    draft = function()
+        pr().set_state("draft")
+    end,
+    close = function()
+        pr().set_state("close")
+    end,
+    reopen = function()
+        pr().set_state("reopen")
+    end,
+    browser = function()
+        pr().browser()
+    end,
+    url = function()
+        pr().url()
+    end,
+}
+
+-- the nested `review` group (§8.2): a number opens that PR + starts the draft; a keyword is
+-- a draft action on the active session; empty / `start` starts (or resumes) the draft.
+-- number and keyword never collide, so there's no precedence to remember
+---@param arg string|nil
+function M.pr_review(arg)
+    local P = pr()
+    if arg == nil or arg == "" or arg == "start" then
+        return P.review() -- start/resume on the active session
+    elseif tonumber(arg) then
+        return P.review({ number = tonumber(arg) }) -- open PR n + start
+    elseif arg == "submit" then
+        return P.submit()
+    elseif arg == "discard" then
+        return P.discard_review()
+    elseif arg == "resume" then
+        return P.resume()
+    end
+    notify("unknown `pr review` action: " .. arg, vim.log.levels.WARN)
+end
+
+-- :Dipher pr [<n>|owner/repo#n|<verb> [arg]] (§8.2). bare / a number / owner/repo#number
+-- open the PR and land on the overview (the PR home); a recognised verb dispatches via
+-- PR_VERBS. session-context verbs act on the one active session (pr.with_session)
 ---@param verb string|nil
 ---@param arg string|nil
 function M.pr(verb, arg)
-    local pr = require("dipher.pr")
+    local P = pr()
     if verb == nil or verb == "" or tonumber(verb) then
-        return pr.open({ number = verb and tonumber(verb) or nil })
+        return P.open({ number = verb and tonumber(verb) or nil, land = "overview" })
     end
     -- explicit override: owner/repo#number targets a specific repo (forks, §1)
     local owner, repo, num = verb:match("^([^/]+)/([^#]+)#(%d+)$")
     if owner then
-        return pr.open({ coords = { owner = owner, repo = repo }, number = tonumber(num) })
+        return P.open({
+            coords = { owner = owner, repo = repo },
+            number = tonumber(num),
+            land = "overview",
+        })
     end
-    local dispatch = {
-        list = function()
-            pr.open({ filter = arg or "open" })
-        end,
-        -- cursor-context: resolve/unresolve the thread under the cursor in the diff (§6.4)
-        resolve = function()
-            pr.resolve()
-        end,
-        -- the file-entry verbs (§8.2): view enters the diff read-only, review enters +
-        -- starts a review. a number opens that PR fresh; no number reuses the active
-        -- session (review with no number starts a draft on it)
-        view = function()
-            pr.view({ number = arg and tonumber(arg) })
-        end,
-        -- the review-authoring loop (§8.2): start a draft, submit/discard it, resume a
-        -- pending draft, or reply to the thread under the cursor
-        review = function()
-            pr.review({ number = arg and tonumber(arg) })
-        end,
-        -- refocus the overview home (the PR landing page) from within the file diff
-        overview = function()
-            pr.overview()
-        end,
-        submit = function()
-            pr.submit()
-        end,
-        discard = function()
-            pr.discard_review()
-        end,
-        resume = function()
-            pr.resume(arg)
-        end,
-        reply = function()
-            pr.reply()
-        end,
-        delete = function()
-            pr.delete_comment()
-        end,
-        -- the read-only CI checks view (§8.2)
-        checks = function()
-            pr.checks()
-        end,
-        -- lifecycle (§8.2): merge takes an optional method; ready/draft/close/reopen map
-        -- to a set_pr_state value; checkout/browser/url stay client-side (§7.3)
-        merge = function()
-            pr.merge(arg)
-        end,
-        checkout = function()
-            pr.checkout()
-        end,
-        ready = function()
-            pr.set_state("ready")
-        end,
-        draft = function()
-            pr.set_state("draft")
-        end,
-        close = function()
-            pr.set_state("close")
-        end,
-        reopen = function()
-            pr.set_state("reopen")
-        end,
-        browser = function()
-            pr.browser()
-        end,
-        url = function()
-            pr.url()
-        end,
-    }
-    local h = dispatch[verb]
+    local h = PR_VERBS[verb]
     if h then
-        return h()
+        return h(arg)
     end
     notify("unknown `pr` subcommand: " .. verb, vim.log.levels.WARN)
 end
@@ -170,9 +181,9 @@ end
 -- page, which has no panel for git.close to catch, or the review proper) ends through
 -- its own teardown; otherwise close the local git diff session
 function M.close()
-    local pr = require("dipher.pr")
-    if pr.current_session() then
-        return pr.end_session()
+    local P = pr()
+    if P.current_session() then
+        return P.end_session()
     end
     require("dipher.git").close()
 end
@@ -285,18 +296,13 @@ local VALUES = {
     layout = { "stacked", "split" },
     context = { "full", "+", "-" },
     panel = { "left", "right", "top", "bottom" },
-    -- later slices implement these sub-verbs; listing now keeps completion stable
+    -- first-level pr verbs (§8.2). cursor-context gestures (resolve/reply/delete) are
+    -- keymaps, not ex-commands; the review-draft actions nest under `review` (PR_SUB)
     pr = {
         "list",
         "view",
         "overview",
-        "delete",
-        "resolve",
-        "reply",
         "review",
-        "submit",
-        "discard",
-        "resume",
         "checks",
         "merge",
         "checkout",
@@ -312,17 +318,17 @@ local VALUES = {
     log = { "base" },
 }
 
--- third-level completion: a sub-verb's own argument values, keyed by subcommand then
--- verb. `pr merge` takes a merge method (§8.2)
----@type table<string, table<string, string[]>>
-local NESTED = {
-    pr = {
-        merge = { "squash", "merge", "rebase" },
-    },
+-- second-level completion under `pr <group>` (§8.2): the review-draft actions, and the
+-- merge method as a freebie of the same table. a numeric `pr review <n>` simply matches
+-- nothing here, which is correct
+---@type table<string, string[]>
+local PR_SUB = {
+    review = { "start", "submit", "discard", "resume" },
+    merge = { "squash", "merge", "rebase" },
 }
 
 -- completion: subcommands at token 2, that subcommand's value set at token 3, and a
--- verb's own argument values at token 4 (e.g. `:Dipher pr merge <method>`). the token
+-- `pr` group's nested actions at token 4 (e.g. `:Dipher pr review <action>`). the token
 -- being completed is the last part when arglead is non-empty, else the next one
 ---@param arglead string
 ---@param cmdline string
@@ -337,8 +343,10 @@ function M.complete(arglead, cmdline)
         pool[#pool + 1] = "base" -- the trunk diff shortcut isn't a SUB handler
     elseif idx == 3 then
         pool = VALUES[parts[2]] or {}
+    elseif parts[2] == "pr" then
+        pool = PR_SUB[parts[3]] or {}
     else
-        pool = (NESTED[parts[2]] or {})[parts[3]] or {}
+        pool = {}
     end
     return vim.tbl_filter(function(c)
         return c:find(arglead, 1, true) == 1

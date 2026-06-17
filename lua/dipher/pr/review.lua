@@ -60,7 +60,7 @@ function M.start(session)
     end)
 end
 
--- :Dipher pr resume — reattach the current session to its pending draft and jump to a
+-- :Dipher pr review resume — reattach the current session to its pending draft and jump to a
 -- pending comment (position restore, §8.2). a no-op notice when there's no draft
 ---@param session table
 function M.reattach(session)
@@ -90,7 +90,7 @@ function M.reattach(session)
     end)
 end
 
--- :Dipher pr submit — finalise the draft as one batch. pick an event, author a summary
+-- :Dipher pr review submit — finalise the draft as one batch. pick an event, author a summary
 -- in the compose float, then submit with the session head guard. on success the drafts
 -- become published (re-fetched) and immediate mode resumes
 ---@param session table
@@ -142,7 +142,7 @@ function M._do_submit(session, event, body)
     end)
 end
 
--- :Dipher pr discard — drop the pending draft and its unsubmitted comments. destructive,
+-- :Dipher pr review discard — drop the pending draft and its unsubmitted comments. destructive,
 -- so it confirms first; the draft threads then vanish from the overlay
 ---@param session table
 function M.discard(session)
