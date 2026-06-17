@@ -177,15 +177,30 @@ function M.pr(verb, arg)
     notify("unknown `pr` subcommand: " .. verb, vim.log.levels.WARN)
 end
 
--- :Dipher close: end the active session. a live PR session (the pre-review overview
--- page, which has no panel for git.close to catch, or the review proper) ends through
--- its own teardown; otherwise close the local git diff session
+-- :Dipher close: end the active session. a merge-tool session ends through its own
+-- teardown; a live PR session (the pre-review overview page, which has no panel for
+-- git.close to catch, or the review proper) likewise; otherwise close the local git diff
 function M.close()
+    local mg = require("dipher.merge")
+    if mg.current() then
+        return mg.close()
+    end
     local P = pr()
     if P.current_session() then
         return P.end_session()
     end
     require("dipher.git").close()
+end
+
+-- :Dipher mergetool [path|diff3_mixed]: 3-way conflict resolution (§8.5). no arg targets
+-- the current file (else the sole conflicted file, else a picker); `diff3_mixed` shows the
+-- base column too. read-only navigation for now; resolution + write land in slice 3
+---@param arg string|nil
+function M.mergetool(arg)
+    if arg == "diff3_mixed" then
+        return require("dipher.merge").open({ layout = "diff3_mixed" })
+    end
+    require("dipher.merge").open({ path = (arg ~= "" and arg) or nil })
 end
 
 -- :Dipher log [arg]: file history (§8.4). no arg or an arg naming a readable file →
@@ -260,6 +275,7 @@ local SUB = {
     gofile = M.gofile,
     edit = M.edit,
     log = M.log,
+    mergetool = M.mergetool,
     sidecar = M.sidecar,
     cache = M.cache,
 }
@@ -316,6 +332,7 @@ local VALUES = {
     sidecar = { "stop" },
     cache = { "clear" },
     log = { "base" },
+    mergetool = { "diff3_mixed" },
 }
 
 -- second-level completion under `pr <group>` (§8.2): the review-draft actions, and the

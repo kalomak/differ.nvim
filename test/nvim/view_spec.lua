@@ -844,6 +844,7 @@ describe("command router", function()
             "gofile",
             "layout",
             "log",
+            "mergetool",
             "panel",
             "pr",
             "sidecar",

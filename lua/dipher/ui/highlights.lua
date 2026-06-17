@@ -159,6 +159,23 @@ local function overview_groups(p)
     }
 end
 
+-- merge-tool region backgrounds (§8.5): one quiet tint per side so each conflict slab
+-- reads as that version (ours green, theirs blue, base muted) and the result's
+-- unresolved block stands out in the conflict orange. same blend recipe as the diff
+-- line backgrounds, bg-only so native syntax shows through
+---@param p table<string, integer>
+---@return table<string, vim.api.keyset.highlight>
+local function merge_groups(p)
+    local base = bg_of({ "Normal" }, 0x14161b)
+    local w = 0.16
+    return {
+        dipherMergeOurs = { bg = blend(p.green, base, w) },
+        dipherMergeTheirs = { bg = blend(p.blue, base, w) },
+        dipherMergeBase = { bg = blend(p.grey, base, w) },
+        dipherMergeConflict = { bg = blend(p.orange, base, w) },
+    }
+end
+
 -- coherent two-tone diff backgrounds: a quiet line tint and a richer same-hue word
 -- patch, both blended from one vivid colour per side (the add/delete fg) over the
 -- editor bg. deriving line and patch from the same source keeps the hue identical
@@ -191,6 +208,7 @@ local function apply()
         LINKS,
         status_groups(p),
         diff_bg_groups(p),
+        merge_groups(p),
         thread_groups(p),
         overview_groups(p)
     )
