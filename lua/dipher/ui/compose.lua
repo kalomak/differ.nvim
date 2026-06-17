@@ -84,6 +84,7 @@ function M.open(opts)
             return
         end
         closed = true
+        vim.cmd("stopinsert") -- submitting from insert mode must not leave the diff in insert
         if win and vim.api.nvim_win_is_valid(win) then
             pcall(vim.api.nvim_win_close, win, true)
         end
