@@ -132,6 +132,9 @@ local function thread_groups(p)
         dipherThreadPending = { fg = p.orange, bg = panel },
         dipherThreadMeta = { fg = p.grey, bg = panel },
         dipherThreadBody = { bg = panel }, -- fg unset -> Normal, readable on the tint
+        -- the diff winbar's pending-review badge: a bold warning yellow so the draft
+        -- state stands out (no bg; it rides the winbar, not the panel tint)
+        dipherReviewDraft = { fg = p.yellow, bold = true },
         -- the lines a range comment covers: the same blue family as the panel, a touch
         -- stronger so it reads over the diff bg, but far gentler than the old Visual link
         dipherThreadRange = { bg = blend(p.blue, base, 0.2) },

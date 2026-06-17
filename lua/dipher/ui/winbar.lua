@@ -54,11 +54,12 @@ function M.diff()
     local total = #view.model.hunks
     local lnum = vim.api.nvim_win_get_cursor(win)[1]
     local k = math.max(hunk_at(map, lnum), total > 0 and 1 or 0)
-    -- a pending-review badge when this is a PR diff with an active draft, so the
-    -- draft state is visible while reviewing (not just in the compose window)
+    -- a pending-review badge when this is a PR diff with an active draft, right-aligned
+    -- next to the hunk counter in a bold warning colour so the draft state stands out
+    -- while reviewing (not just in the compose window)
     local draft = require("dipher.pr").review_status(buf)
-    local badge = draft and ("  %#dipherThreadPending#● " .. draft .. "%*") or ""
-    return (" %s%s %%=◆ hunk %d/%d "):format(
+    local badge = draft and ("%#dipherReviewDraft#● " .. draft .. "%*   ") or ""
+    return (" %s %%=%s◆ hunk %d/%d "):format(
         esc(vim.fn.fnamemodify(view.model.path, ":t")),
         badge,
         k,
