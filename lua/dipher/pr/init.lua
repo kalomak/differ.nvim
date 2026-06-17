@@ -458,6 +458,23 @@ function M.delete_comment()
         require("dipher.pr.comment").delete(session)
     end
 end
+
+-- a short label for the diff winbar when `bufnr` is this PR session's diff and a pending
+-- review is active, else nil (git diffs and immediate mode show nothing). lets the
+-- draft state stay visible while reviewing, not just in the compose window
+---@param bufnr integer
+---@return string|nil
+function M.review_status(bufnr)
+    if not (session and session.review_id and session.view) then
+        return nil
+    end
+    for _, col in ipairs(session.view.columns or {}) do
+        if col.bufnr == bufnr then
+            return "review draft"
+        end
+    end
+    return nil
+end
 function M.review()
     if not session then
         return notify("open a PR first")
