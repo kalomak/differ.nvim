@@ -434,6 +434,43 @@ local function is_worktree_status(source)
     return source.old.kind == "rev" and source.old.rev == "HEAD" and source.new.kind == "worktree"
 end
 
+-- the configured base branch resolved to a ref, for the `base` shortcut (§8.1).
+-- explicit config wins; else the remote's default (origin/HEAD -> "origin/main");
+-- else the first of main/master that exists. nil when none resolve
+---@param root string
+---@return string|nil
+local function base_ref(root)
+    local cfg = require("dipher").get_config()
+    if cfg.base and cfg.base ~= "" then
+        return cfg.base
+    end
+    local out = git({ "rev-parse", "--abbrev-ref", "origin/HEAD" }, root)
+    if out then
+        return chomp(out) -- e.g. "origin/main"
+    end
+    for _, name in ipairs({ "main", "master" }) do
+        if git({ "rev-parse", "--verify", "--quiet", name }, root) then
+            return name
+        end
+    end
+    return nil
+end
+
+-- repo root + resolved base for the `base` shortcut, notifying on failure. returns
+-- the base ref the caller suffixes (`...HEAD` for log, `...` for diff), or nil
+---@return string|nil
+function M.resolve_base()
+    local root = repo_root()
+    if not root then
+        return notify("not inside a git repository", vim.log.levels.WARN)
+    end
+    local base = base_ref(root)
+    if not base then
+        return notify("couldn't resolve a base branch (set `base` in config)", vim.log.levels.WARN)
+    end
+    return base
+end
+
 -- :Dipher panel: open (or toggle) the file panel (§8.6) over a git change set.
 -- selecting a file re-sources the one View in place rather than spawning a new
 -- one. `opts.rev` is the rev spec; position/listing/height/width pass through to

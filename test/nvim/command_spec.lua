@@ -29,6 +29,58 @@ describe("command completion", function()
         assert.are.same({ "left", "right", "top", "bottom" }, command.complete("", "Dipher panel "))
         assert.are.same({ "left" }, command.complete("l", "Dipher panel l"))
     end)
+
+    it("offers the base shortcut at position 1 and under log", function()
+        assert.is_true(vim.tbl_contains(command.complete("", "Dipher "), "base"))
+        assert.are.same({ "base" }, command.complete("", "Dipher log "))
+    end)
+end)
+
+describe("command base shortcut", function()
+    it("log base opens range history of <base>...HEAD", function()
+        local git = require("dipher.git")
+        local saved_base, saved_range = git.resolve_base, git.range_history
+        local got
+        git.resolve_base = function()
+            return "origin/main"
+        end
+        git.range_history = function(opts)
+            got = opts
+        end
+        command.log("base")
+        git.resolve_base, git.range_history = saved_base, saved_range
+        assert.are.same({ range = "origin/main...HEAD" }, got)
+    end)
+
+    it("bare base opens the panel over <base>... (branch vs trunk)", function()
+        local git = require("dipher.git")
+        local saved_base, saved_panel = git.resolve_base, git.panel
+        local got
+        git.resolve_base = function()
+            return "origin/main"
+        end
+        git.panel = function(opts)
+            got = opts
+        end
+        command.dispatch({ "base" })
+        git.resolve_base, git.panel = saved_base, saved_panel
+        assert.are.same({ rev = "origin/main...", open_first = true }, got)
+    end)
+
+    it("does nothing when no base resolves", function()
+        local git = require("dipher.git")
+        local saved_base, saved_range = git.resolve_base, git.range_history
+        local called = false
+        git.resolve_base = function()
+            return nil
+        end
+        git.range_history = function()
+            called = true
+        end
+        command.log("base")
+        git.resolve_base, git.range_history = saved_base, saved_range
+        assert.is_false(called)
+    end)
 end)
 
 describe("command panel", function()

@@ -132,10 +132,17 @@ function M.close()
 end
 
 -- :Dipher log [arg]: file history (§8.4). no arg or an arg naming a readable file →
--- single-file history (that file, else the current buffer); any other arg is treated
--- as a rev-range → branch-range history
+-- single-file history (that file, else the current buffer); `base` is the trunk
+-- shortcut → branch-range history of `<base>...HEAD`; any other arg is a rev-range
 ---@param arg string|nil
 function M.log(arg)
+    if arg == "base" then
+        local base = require("dipher.git").resolve_base()
+        if not base then
+            return
+        end
+        return require("dipher.git").range_history({ range = base .. "...HEAD" })
+    end
     if arg and arg ~= "" and vim.fn.filereadable(vim.fn.fnamemodify(arg, ":p")) == 0 then
         return require("dipher.git").range_history({ range = arg })
     end
@@ -201,14 +208,22 @@ local SUB = {
 }
 
 -- route `:Dipher ...`. a recognised subcommand (layout/context/panel) takes its
--- arg; anything else, including no args, is a local-diff rev spec (§8.1), so
--- `:Dipher`, `:Dipher main...`, `:Dipher a..b` open the file panel over that
+-- arg; `base` is the trunk shortcut → the whole branch vs base (`<base>...`, incl.
+-- uncommitted); anything else, including no args, is a local-diff rev spec (§8.1),
+-- so `:Dipher`, `:Dipher main...`, `:Dipher a..b` open the file panel over that
 -- change set and show the first file's diff (DiffviewOpen-style)
 ---@param fargs string[]
 function M.dispatch(fargs)
     local handler = fargs[1] and SUB[fargs[1]]
     if handler then
         return handler(fargs[2], fargs[3])
+    end
+    if fargs[1] == "base" then
+        local base = require("dipher.git").resolve_base()
+        if not base then
+            return
+        end
+        return require("dipher.git").panel({ rev = base .. "...", open_first = true })
     end
     require("dipher.git").panel({ rev = fargs, open_first = true })
 end
@@ -240,6 +255,7 @@ local VALUES = {
     },
     sidecar = { "stop" },
     cache = { "clear" },
+    log = { "base" },
 }
 
 -- completion: subcommands at position 1, then that subcommand's value set
@@ -252,6 +268,7 @@ function M.complete(arglead, cmdline)
     local pool
     if #parts < 2 or (#parts == 2 and arglead ~= "") then
         pool = vim.tbl_keys(SUB)
+        pool[#pool + 1] = "base" -- the trunk diff shortcut isn't a SUB handler
     else
         pool = VALUES[parts[2]] or {}
     end

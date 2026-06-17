@@ -816,6 +816,7 @@ describe("command router", function()
         local subs = command.complete("", "Dipher ")
         table.sort(subs)
         assert.are.same({
+            "base",
             "cache",
             "close",
             "context",

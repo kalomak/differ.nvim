@@ -17,6 +17,7 @@
 ---@field panel dipher.Config.Panel
 ---@field keymaps table<string, string|string[]|false|table>
 ---@field relative_dates boolean
+---@field base string|nil
 ---@field sidecar_bin string|nil
 
 local M = {}
@@ -97,6 +98,9 @@ M.defaults = {
     -- show dates as relative ("3 days ago") instead of YYYY-MM-DD wherever the
     -- plugin renders one (the history panel today, more surfaces later)
     relative_dates = false,
+    -- base branch for the `base` shortcut (`:Dipher base`, `:Dipher log base`).
+    -- nil auto-detects: origin/HEAD (the remote trunk), else local main/master
+    base = nil,
     sidecar_bin = nil,
 }
 
