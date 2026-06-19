@@ -1,4 +1,4 @@
-local thread = require("dipher.ui.thread")
+local thread = require("differ.ui.thread")
 
 -- inject a deterministic reltime so the golden chunks don't depend on the clock
 local function build(t, collapsed)
@@ -41,12 +41,12 @@ describe("ui.thread.build (expanded)", function()
 
     it("colours the chrome with the open state group and meta separately", function()
         local header = build(OPEN)[1]
-        assert.are.same({ "┌─ ", "dipherThread" }, header[1])
-        assert.are.same({ "@alice", "dipherThread" }, header[2])
-        assert.are.same({ " · 3d ago", "dipherThreadMeta" }, header[3])
+        assert.are.same({ "┌─ ", "differThread" }, header[1])
+        assert.are.same({ "@alice", "differThread" }, header[2])
+        assert.are.same({ " · 3d ago", "differThreadMeta" }, header[3])
         local body = build(OPEN)[2]
-        assert.are.same({ "│  ", "dipherThread" }, body[1])
-        assert.are.same({ "needs a null check here", "dipherThreadBody" }, body[2])
+        assert.are.same({ "│  ", "differThread" }, body[1])
+        assert.are.same({ "needs a null check here", "differThreadBody" }, body[2])
     end)
 
     it("pluralises replies and shows the open tag", function()
@@ -82,10 +82,10 @@ describe("ui.thread.build (resolved + pending state)", function()
         local t = { resolved = true, is_pending = false, comments = OPEN.comments }
         local rows = build(t)
         assert.are.equal("┌─ @alice · 3d ago", text(rows[1])) -- state moved off the header
-        assert.are.same({ "┌─ ", "dipherThreadResolved" }, rows[1][1])
+        assert.are.same({ "┌─ ", "differThreadResolved" }, rows[1][1])
         assert.are.equal("└─ ↳ 1 reply · ✓ resolved", text(rows[#rows]))
         -- the resolved tag rides its own green group, separate from the meta chrome
-        assert.are.same({ "✓ resolved", "dipherThreadResolvedTag" }, rows[#rows][#rows[#rows]])
+        assert.are.same({ "✓ resolved", "differThreadResolvedTag" }, rows[#rows][#rows[#rows]])
     end)
 
     it("a resolved single-comment thread still shows the resolved tag on the footer", function()
@@ -101,7 +101,7 @@ describe("ui.thread.build (resolved + pending state)", function()
             { is_pending = true, comments = { { author = "a", body = "wip", created_at = "t" } } }
         local rows = build(t)
         assert.are.equal("┌─ @a · t (draft)", text(rows[1]))
-        assert.are.same({ " (draft)", "dipherThreadPending" }, rows[1][#rows[1]])
+        assert.are.same({ " (draft)", "differThreadPending" }, rows[1][#rows[1]])
     end)
 end)
 

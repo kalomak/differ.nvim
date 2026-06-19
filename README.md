@@ -1,6 +1,6 @@
 <div align="center">
 
-# dipher.nvim
+# differ.nvim
 
 **A Neovim diff viewer with a stacked dual-rail layout alongside side-by-side, word-level highlighting, and treesitter syntax.**
 
@@ -17,15 +17,15 @@
 
 ---
 
-dipher renders local git diffs and (eventually) GitHub PR reviews through one Lua engine. The bet is a single renderer core with a bidirectional line map, fed by interchangeable sources, so every diff shares one render path. It targets the diffview + octo workflows it replaces, not a cut-down version of them.
+differ renders local git diffs and (eventually) GitHub PR reviews through one Lua engine. The bet is a single renderer core with a bidirectional line map, fed by interchangeable sources, so every diff shares one render path. It targets the diffview + octo workflows it replaces, not a cut-down version of them.
 
 ---
 
 ## Status
 
-dipher is in early development and not ready to daily-drive.
+differ is in early development and not ready to daily-drive.
 
-The rendering core is done: local diffs render in both layouts with word-level highlights and treesitter syntax, and the git source layer is wired so `:Dipher` diffs the current file. The changed-file picker, file panel, staging, history, and the entire PR-review side are not built yet. See the [roadmap](#roadmap).
+The rendering core is done: local diffs render in both layouts with word-level highlights and treesitter syntax, and the git source layer is wired so `:Differ` diffs the current file. The changed-file picker, file panel, staging, history, and the entire PR-review side are not built yet. See the [roadmap](#roadmap).
 
 ---
 
@@ -56,29 +56,29 @@ The Go sidecar is a later phase and is not needed for local diffs.
 
 ```lua
 {
-  "seanhalberthal/dipher.nvim",
+  "seanhalberthal/differ.nvim",
   config = function()
-    require("dipher").setup()
+    require("differ").setup()
   end,
 }
 ```
 
-`setup()` is only needed to change defaults and register highlight groups eagerly. The `:Dipher` command is registered on startup either way.
+`setup()` is only needed to change defaults and register highlight groups eagerly. The `:Differ` command is registered on startup either way.
 
 ---
 
 ## Usage
 
-`:Dipher [revspec]` diffs the current file against a resolved source. The grammar mirrors git and diffview:
+`:Differ [revspec]` diffs the current file against a resolved source. The grammar mirrors git and diffview:
 
 | Command | Diffs |
 |---|---|
-| `:Dipher` | `HEAD` vs worktree (all uncommitted changes) |
-| `:Dipher <rev>` | `<rev>` vs worktree (changes since `<rev>`) |
-| `:Dipher <a>..<b>` | `<a>` vs `<b>` (two-dot range) |
-| `:Dipher <a>...<b>` | merge-base(`<a>`, `<b>`) vs `<b>` |
-| `:Dipher <a>...` | merge-base(`<a>`, `HEAD`) vs worktree (branch total) |
-| `:Dipher <a> <b>` | `<a>` vs `<b>` |
+| `:Differ` | `HEAD` vs worktree (all uncommitted changes) |
+| `:Differ <rev>` | `<rev>` vs worktree (changes since `<rev>`) |
+| `:Differ <a>..<b>` | `<a>` vs `<b>` (two-dot range) |
+| `:Differ <a>...<b>` | merge-base(`<a>`, `<b>`) vs `<b>` |
+| `:Differ <a>...` | merge-base(`<a>`, `HEAD`) vs worktree (branch total) |
+| `:Differ <a> <b>` | `<a>` vs `<b>` |
 
 ### Runtime controls
 
@@ -86,14 +86,14 @@ These re-render the active view only. No refetch, no re-diff, and the state is l
 
 | Command | Effect |
 |---|---|
-| `:Dipher layout [stacked\|split]` | Set layout; no argument flips it |
-| `:Dipher context <n>` | Set context lines around hunks |
-| `:Dipher context full` | Show the whole file |
-| `:Dipher context +` / `-` | Widen / narrow context by one |
+| `:Differ layout [stacked\|split]` | Set layout; no argument flips it |
+| `:Differ context <n>` | Set context lines around hunks |
+| `:Differ context full` | Show the whole file |
+| `:Differ context +` / `-` | Widen / narrow context by one |
 
 ### Keymaps
 
-Buffer-local, active inside a dipher diff:
+Buffer-local, active inside a differ diff:
 
 | Key | Action |
 |---|---|
@@ -103,11 +103,11 @@ Buffer-local, active inside a dipher diff:
 ### Lua API
 
 ```lua
--- Same as :Dipher, for binding keys:
-require("dipher").open("main...")
+-- Same as :Differ, for binding keys:
+require("differ").open("main...")
 
 -- Render any old/new text pair directly:
-require("dipher").diff({
+require("differ").diff({
   path = "lua/foo.lua",
   old_text = old,
   new_text = new,
@@ -123,7 +123,7 @@ require("dipher").diff({
 `setup()` merges over these defaults:
 
 ```lua
-require("dipher").setup({
+require("differ").setup({
   layout = "stacked",            -- "stacked" | "split", toggleable per-view
   context = 10,                  -- context lines (math.huge = full file)
   deep_diff = {
@@ -158,10 +158,10 @@ require("dipher").setup({
 
 ## Architecture
 
-A monorepo: a Lua renderer core (`lua/dipher/`) and a Go sidecar (`cmd/dipher-sidecar/`), so protocol changes land atomically across both. The hunk model is canonical and buffers are projections of it; renderers are pure functions over hunks, which is why a layout toggle is just a re-render.
+A monorepo: a Lua renderer core (`lua/differ/`) and a Go sidecar (`cmd/differ-sidecar/`), so protocol changes land atomically across both. The hunk model is canonical and buffers are projections of it; renderers are pure functions over hunks, which is why a layout toggle is just a re-render.
 
 ```
-frontends            core (lua/dipher)
+frontends            core (lua/differ)
 ┌──────────────┐     ┌──────────────────────────────┐
 │ local diff   │────▶│  hunk model (canonical)      │
 │ (git + diff) │     │  ├─ renderer: stacked        │
@@ -173,7 +173,7 @@ frontends            core (lua/dipher)
        │ JSON over stdio
        ▼
 ┌──────────────────┐         ┌─────────────┐
-│ dipher-sidecar   │────────▶│ GitHub API  │
+│ differ-sidecar   │────────▶│ GitHub API  │
 │ (Go, gh auth)    │         │ (REST+GQL)  │
 └──────────────────┘         └─────────────┘
 ```
@@ -182,10 +182,10 @@ frontends            core (lua/dipher)
 <summary>Repository layout</summary>
 
 ```
-lua/dipher/
+lua/differ/
   init.lua          # setup() + public API (diff / open)
   config.lua        # option defaults and merge
-  command.lua       # :Dipher subcommand router
+  command.lua       # :Differ subcommand router
   view.lua          # per-view state, windows, in-view keymaps
   model/diff.lua    # hunk model from vim.diff
   render/           # walk, line map, stacked + split renderers
@@ -193,7 +193,7 @@ lua/dipher/
   syntax/           # treesitter pass projected through the line map
   ui/               # statuscolumn rail, paint, highlight groups
   git/              # local source: rev-spec grammar + git I/O
-cmd/dipher-sidecar/ # Go GitHub sidecar (later phase)
+cmd/differ-sidecar/ # Go GitHub sidecar (later phase)
 test/
   unit/             # pure-Lua busted specs (no Neovim runtime)
   nvim/             # headless-nvim specs (extmark/window assertions)

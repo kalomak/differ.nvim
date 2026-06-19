@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // gqlOp returns the operation name from a GraphQL request body so a fake transport

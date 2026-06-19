@@ -11,4 +11,10 @@ return {
         ROOT = { "test/unit" },
         pattern = "_spec%.lua$",
     },
+    -- headless-nvim suite: loads minimal_init first to capture notifications
+    nvim = {
+        ROOT = { "test/nvim" },
+        pattern = "_spec%.lua$",
+        helper = "test/nvim/minimal_init.lua",
+    },
 }

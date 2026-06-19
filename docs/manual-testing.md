@@ -72,7 +72,7 @@ mutate:
 ## once the lua client is in
 
 1. build the sidecar (`make go-build`) and point the plugin at the binary
-2. against the dummy repo PRs, run the `:Dipher pr …` commands and walk the
+2. against the dummy repo PRs, run the `:Differ pr …` commands and walk the
    coverage list through the real UX
 3. swap to the dummy's token to exercise the author-only and counterpart actions the
    main account can't perform on its own PRs
@@ -81,30 +81,30 @@ mutate:
 
 from inside the test repo's worktree:
 
-- `:Dipher pr` lists the open PRs in the picker, each row `#<n> <title> · @<author>
+- `:Differ pr` lists the open PRs in the picker, each row `#<n> <title> · @<author>
   <relative time>`, drafts marked `[draft]`; selecting one opens the session tab
-- `:Dipher pr <n>` skips the picker and opens that PR directly
-- `:Dipher pr <owner>/<repo>#<n>` targets a fork / another repo (the §1 override)
+- `:Differ pr <n>` skips the picker and opens that PR directly
+- `:Differ pr <owner>/<repo>#<n>` targets a fork / another repo (the §1 override)
 - the panel lists the PR's files with a `[x]`/`[ ]` viewed column (viewed files
   dimmed); the first file auto-opens in the diff with base/head as the rev labels
 - added file → base side empty; deleted file → head side empty; modified → both
 - `]f`/`[f` step files, re-sourcing the one diff in place (no new windows); revisits
   are instant (the per-session blob memo)
-- `:Dipher close` tears the session down and returns to the invoking tab
+- `:Differ close` tears the session down and returns to the invoking tab
 - error paths surface one notification: no token (`gh auth login`), no gh
   (`install gh or set GH_TOKEN`), a non-github remote (`not a github remote`)
 
 ### slice 6 — overview home + minimal timeline
 
-- `:Dipher pr <n>` (and a `:Dipher pr list` pick) lands on the overview home — a
+- `:Differ pr <n>` (and a `:Differ pr list` pick) lands on the overview home — a
   pre-review page filling the session tab with **no file panel** (the panel belongs to
   the review proper): the title/state/author/mergeable header, a `checks: … · threads:
   N unresolved / M` line, the PR body, then the timeline
 - from the overview, `e` enters the review (builds the panel + diff in the same tab),
   `r` enters + starts a review, `q`/`<Esc>` backs out of the PR (ends the session)
-- `:Dipher pr view <n>` skips the overview and lands straight on the first file
-  (read-only); `:Dipher pr review <n>` lands on the first file with a review started
-- `:Dipher pr overview` from within the review goes back to the home page: the diff
+- `:Differ pr view <n>` skips the overview and lands straight on the first file
+  (read-only); `:Differ pr review <n>` lands on the first file with a review started
+- `:Differ pr overview` from within the review goes back to the home page: the diff
   closes and the panel hides (the session stays live); `e`/`r` re-enter, reopening the
   panel + diff without a refetch
 - a real PR with conversation comments + an approval + a changes-requested review

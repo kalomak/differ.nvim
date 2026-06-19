@@ -2,7 +2,7 @@
 -- conflict.parse + to_lines), only the I/O reads are faked, so the assembly + the
 -- no-conflict / missing-file guards are checked without a git repo or nvim runtime
 
-local model = require("dipher.merge.model")
+local model = require("differ.merge.model")
 
 -- a default-style conflicted worktree file
 local RESULT = table.concat({
@@ -32,11 +32,11 @@ end
 
 describe("merge.model.build", function()
     after_each(function()
-        package.loaded["dipher.git"] = nil
+        package.loaded["differ.git"] = nil
     end)
 
     it("assembles the model from the worktree result and the three stages", function()
-        package.loaded["dipher.git"] = fake_git()
+        package.loaded["differ.git"] = fake_git()
         local m, err = model.build("/repo", "a.txt", "main")
         assert.is_nil(err)
         assert.are.equal("a.txt", m.path)
@@ -51,21 +51,21 @@ describe("merge.model.build", function()
     end)
 
     it("returns nil + reason when the file has no conflict markers", function()
-        package.loaded["dipher.git"] = fake_git({ worktree = "clean file\n" })
+        package.loaded["differ.git"] = fake_git({ worktree = "clean file\n" })
         local m, err = model.build("/repo", "a.txt", nil)
         assert.is_nil(m)
         assert.is_string(err)
     end)
 
     it("returns nil + reason when the file is not in the working tree", function()
-        package.loaded["dipher.git"] = fake_git({ worktree = false })
+        package.loaded["differ.git"] = fake_git({ worktree = false })
         local m, err = model.build("/repo", "gone.txt", nil)
         assert.is_nil(m)
         assert.is_string(err)
     end)
 
     it("reads an absent stage as empty (modify/delete conflict)", function()
-        package.loaded["dipher.git"] = fake_git({ stages = { [2] = "ours\n" } })
+        package.loaded["differ.git"] = fake_git({ stages = { [2] = "ours\n" } })
         local m = model.build("/repo", "a.txt", nil)
         assert.are.equal("ours\n", m.ours_text)
         assert.are.equal("", m.base_text)

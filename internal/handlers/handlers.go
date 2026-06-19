@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/github"
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/github"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // Handler runs one method: decode params, do the work, return a result struct

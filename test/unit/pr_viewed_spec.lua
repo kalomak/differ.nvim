@@ -1,4 +1,4 @@
-local viewed = require("dipher.pr.viewed")
+local viewed = require("differ.pr.viewed")
 
 -- entries with a `viewed` boolean, like map_files yields. v(true)/u(false) read clearly
 local function entry(path, is_viewed)

@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/github"
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/github"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 type postCommentParams struct {

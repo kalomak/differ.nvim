@@ -1,5 +1,5 @@
 -- runs under headless nvim (vim.diff available); invoked via the nvim-test target
-local diff = require("dipher.model.diff")
+local diff = require("differ.model.diff")
 
 describe("model.diff.build", function()
     it("produces no hunks for identical text", function()

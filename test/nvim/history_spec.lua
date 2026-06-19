@@ -2,8 +2,8 @@
 -- history (§8.4) end-to-end: the log walk, the history panel driving one View per
 -- commit (commit vs its parent), commit stepping, the root-commit add edge, and
 -- session teardown
-local git_src = require("dipher.git")
-local History = require("dipher.history")
+local git_src = require("differ.git")
+local History = require("differ.history")
 
 local function git(cwd, ...)
     local args =
@@ -46,7 +46,7 @@ end
 -- origin window (View.current keys off the focused buffer)
 local function view_in_origin(h)
     vim.api.nvim_set_current_win(h.origin_win)
-    return require("dipher.view").current()
+    return require("differ.view").current()
 end
 
 describe("git.log_commits", function()
@@ -73,7 +73,7 @@ describe("git.log_commits", function()
     end)
 end)
 
-describe(":Dipher log (single-file history)", function()
+describe(":Differ log (single-file history)", function()
     it("opens the history panel and the newest commit's diff", function()
         local root = repo_with_history()
         vim.cmd.edit(root .. "/a.lua")
@@ -109,7 +109,7 @@ describe(":Dipher log (single-file history)", function()
     it("renders relative dates when configured, and toggles live", function()
         local root = repo_with_history()
         vim.cmd.edit(root .. "/a.lua")
-        require("dipher").setup({ relative_dates = true })
+        require("differ").setup({ relative_dates = true })
         git_src.history({})
         local h = History.current()
         assert.is_truthy(h.lines[3]:find("ago", 1, true)) -- relative by config
@@ -118,7 +118,7 @@ describe(":Dipher log (single-file history)", function()
         h:toggle_relative_dates()
         assert.is_truthy(h.lines[3]:find("%d%d%d%d%-%d%d%-%d%d")) -- back to absolute
         h:close()
-        require("dipher").setup({}) -- restore defaults for the rest of the suite
+        require("differ").setup({}) -- restore defaults for the rest of the suite
     end)
 
     it("steps to an older commit and re-sources the same view in place", function()
@@ -176,7 +176,7 @@ describe(":Dipher log (single-file history)", function()
         v:step_file("next") -- no file panel open -> drives the history walk
         assert.are.equal(h.origin_win, vim.api.nvim_get_current_win()) -- focus kept in the diff
         assert.are.equal(2, h.index)
-        assert.are.equal(V2, require("dipher.view").current().model.new_text)
+        assert.are.equal(V2, require("differ.view").current().model.new_text)
         h:close()
     end)
 

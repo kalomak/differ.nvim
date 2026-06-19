@@ -1,5 +1,5 @@
-local tree = require("dipher.panel.tree")
-local render = require("dipher.panel.render")
+local tree = require("differ.panel.tree")
+local render = require("differ.panel.render")
 
 local function entry(path, status, add, del)
     return { path = path, status = status or "M", additions = add or 0, deletions = del or 0 }

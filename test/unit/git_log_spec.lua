@@ -1,4 +1,4 @@
-local log = require("dipher.git.log")
+local log = require("differ.git.log")
 
 local US = "\31"
 

@@ -1,4 +1,4 @@
-local split = require("dipher.render.split")
+local split = require("differ.render.split")
 
 local FULL = math.huge
 

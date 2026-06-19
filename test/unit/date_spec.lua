@@ -1,4 +1,4 @@
-local date = require("dipher.util.date")
+local date = require("differ.util.date")
 
 -- a fixed baseline so the relative buckets are deterministic
 local NOW = 1781349032

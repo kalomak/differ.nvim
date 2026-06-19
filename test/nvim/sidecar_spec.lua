@@ -1,14 +1,14 @@
--- runs under headless nvim: drives the real dipher-sidecar binary (bin/) over the
+-- runs under headless nvim: drives the real differ-sidecar binary (bin/) over the
 -- live stdio protocol, so it doubles as the §7.6 client + handshake smoke test. needs
 -- the binary built (make go-build); skips with a clear message when it is absent.
-local sidecar = require("dipher.sidecar")
+local sidecar = require("differ.sidecar")
 
-require("dipher").setup({})
+require("differ").setup({})
 
 -- the binary the client would resolve, so the suite can skip cleanly when unbuilt.
 local function has_binary()
     local root = vim.fn.getcwd()
-    return vim.fn.executable(root .. "/bin/dipher-sidecar") == 1
+    return vim.fn.executable(root .. "/bin/differ-sidecar") == 1
 end
 
 -- run one request synchronously by pumping the event loop until the callback fires.
@@ -28,7 +28,7 @@ end
 
 describe("sidecar client", function()
     if not has_binary() then
-        pending("bin/dipher-sidecar not built (run `make go-build`)")
+        pending("bin/differ-sidecar not built (run `make go-build`)")
         return
     end
 

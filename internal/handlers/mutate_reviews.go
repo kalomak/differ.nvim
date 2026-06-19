@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // startReview creates (or reattaches to) the viewer's pending review (§7.3).

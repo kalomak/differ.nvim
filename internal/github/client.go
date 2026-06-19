@@ -42,5 +42,5 @@ func New(hc *http.Client, token string, tokenErr error) *Client {
 }
 
 // ClearCache flushes the blob and thread caches; the cache_clear method, surfaced as
-// :Dipher cache clear, calls this.
+// :Differ cache clear, calls this.
 func (c *Client) ClearCache() { c.cache.clearAll() }

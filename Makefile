@@ -14,8 +14,8 @@ NC     := \033[0m
 INFO := printf "$(CYAN)› %s$(NC)\n"
 OK   := printf "$(GREEN)✓$(NC) %s\n"
 
-GO_PKG  := ./cmd/dipher-sidecar
-GO_BIN  := bin/dipher-sidecar
+GO_PKG  := ./cmd/differ-sidecar
+GO_BIN  := bin/differ-sidecar
 
 .PHONY: help \
 	lua-test lua-test-unit lua-test-nvim lua-lint lua-fmt lua-fmt-check \
@@ -34,7 +34,7 @@ lua-test-unit: ## Run pure-Lua unit tests only (fast, no Neovim runtime)
 
 lua-test-nvim: ## Run headless-nvim tests (needs nlua on PATH)
 	@$(INFO) "Running headless-nvim tests"
-	@eval $$(luarocks --lua-version=5.1 path) && busted --lua=nlua test/nvim
+	@eval $$(luarocks --lua-version=5.1 path) && busted --lua=nlua --run nvim
 
 lua-lint: ## Luacheck + stylua --check on Lua sources
 	@$(INFO) "Linting Lua"
@@ -53,7 +53,7 @@ lua-fmt-check: ## Verify Lua formatting without writing
 ##@ Go sidecar
 # ──────────────────────────────────────────────────────────────────────────────
 
-go-build: ## Build the dipher-sidecar binary into bin/
+go-build: ## Build the differ-sidecar binary into bin/
 	@$(INFO) "Building $(GO_BIN)"
 	@go build -o $(GO_BIN) $(GO_PKG)
 	@$(OK) "Built $(GO_BIN)"
@@ -95,7 +95,7 @@ fmt-check: lua-fmt-check go-fmt-check ## Verify formatting across the codebase
 check: lint go-vet test ## Run the full quality gate
 
 clean: ## Remove build artefacts
-	@rm -rf bin dipher-sidecar
+	@rm -rf bin differ-sidecar
 	@$(OK) "Cleaned"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ help: ## Show this help message
 	[ -n "$$cols" ] || cols=$$(tput cols 2>/dev/null); \
 	case "$$cols" in ''|*[!0-9]*) cols=100;; esac; \
 	[ "$$cols" -ge 40 ] || cols=100; \
-	printf "\n  $(BOLD)dipher.nvim$(NC) — make targets\n\n"; \
+	printf "\n  $(BOLD)differ.nvim$(NC) — make targets\n\n"; \
 	awk -v width="$$cols" ' \
 		function wrap(text, w, ind,    n, words, i, line, out, pad) { \
 			pad = sprintf("%" ind "s", ""); \

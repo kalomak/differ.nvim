@@ -1,5 +1,5 @@
-local pr = require("dipher.pr")
-local checks = require("dipher.pr.checks")
+local pr = require("differ.pr")
+local checks = require("differ.pr.checks")
 
 describe("pr.state_for_verb", function()
     it("maps each lifecycle verb to its set_pr_state value", function()

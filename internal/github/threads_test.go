@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 func TestResolveThread(t *testing.T) {

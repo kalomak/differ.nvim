@@ -2,7 +2,7 @@
 -- exercises the slice-2 merge session end-to-end (layout, region highlight, conflict
 -- nav). identity is pinned inline so commits work without a global gitconfig
 
-local merge = require("dipher.merge")
+local merge = require("differ.merge")
 
 local function git(cwd, ...)
     local args =
@@ -109,10 +109,10 @@ local function conflict_repo_multi()
     return root
 end
 
-local merge_ns = vim.api.nvim_create_namespace("dipher.merge")
-local flash_ns = vim.api.nvim_create_namespace("dipher.merge.flash")
+local merge_ns = vim.api.nvim_create_namespace("differ.merge")
+local flash_ns = vim.api.nvim_create_namespace("differ.merge.flash")
 
-describe(":Dipher mergetool", function()
+describe(":Differ mergetool", function()
     after_each(function()
         if merge.current() then
             merge.close()
@@ -195,7 +195,7 @@ local function has_marker(buf)
     return false
 end
 
-describe(":Dipher mergetool resolution", function()
+describe(":Differ mergetool resolution", function()
     after_each(function()
         if merge.current() then
             merge.close()
@@ -207,7 +207,7 @@ describe(":Dipher mergetool resolution", function()
         vim.cmd.edit(root .. "/f.txt")
         merge.open({})
         local s = merge.current()
-        assert.is_true(fire(s.result_buf, "dipher: take ours"))
+        assert.is_true(fire(s.result_buf, "differ: take ours"))
         assert.is_false(has_marker(s.result_buf))
         assert.are.same(
             { "a", "OURS", "c" },
@@ -220,7 +220,7 @@ describe(":Dipher mergetool resolution", function()
         vim.cmd.edit(root .. "/f.txt")
         merge.open({})
         local s = merge.current()
-        fire(s.result_buf, "dipher: take both")
+        fire(s.result_buf, "differ: take both")
         assert.are.same(
             { "a", "OURS", "THEIRS", "c" },
             vim.api.nvim_buf_get_lines(s.result_buf, 0, -1, false)
@@ -232,10 +232,10 @@ describe(":Dipher mergetool resolution", function()
         vim.cmd.edit(root .. "/f.txt")
         merge.open({})
         local s = merge.current()
-        fire(s.result_buf, "dipher: take ours")
+        fire(s.result_buf, "differ: take ours")
         vim.api.nvim_set_current_win(s.result_win)
-        vim.cmd("write")
-        assert.are.same({}, require("dipher.git").conflicted(root))
+        vim.cmd("silent write")
+        assert.are.same({}, require("differ.git").conflicted(root))
     end)
 
     it("does not stage while conflicts remain on write", function()
@@ -244,8 +244,8 @@ describe(":Dipher mergetool resolution", function()
         merge.open({})
         local s = merge.current()
         vim.api.nvim_set_current_win(s.result_win)
-        vim.cmd("write") -- markers still present
-        assert.are.same({ "f.txt" }, require("dipher.git").conflicted(root))
+        vim.cmd("silent write") -- markers still present
+        assert.are.same({ "f.txt" }, require("differ.git").conflicted(root))
     end)
 end)
 
@@ -260,7 +260,7 @@ local function input(s, side)
     end
 end
 
-describe(":Dipher mergetool navigation", function()
+describe(":Differ mergetool navigation", function()
     after_each(function()
         if merge.current() then
             merge.close()
@@ -281,11 +281,11 @@ describe(":Dipher mergetool navigation", function()
             return vim.api.nvim_win_get_cursor(s.result_win)[1]
         end
         assert.are.equal(starts[1], cur()) -- landed on the first
-        fire(s.result_buf, "dipher: next conflict")
+        fire(s.result_buf, "differ: next conflict")
         assert.are.equal(starts[2], cur())
-        fire(s.result_buf, "dipher: next conflict")
+        fire(s.result_buf, "differ: next conflict")
         assert.are.equal(starts[3], cur()) -- the one that used to stick the cursor
-        fire(s.result_buf, "dipher: next conflict")
+        fire(s.result_buf, "differ: next conflict")
         assert.are.equal(starts[1], cur()) -- wrapped back to the first
     end)
 
@@ -305,8 +305,8 @@ describe(":Dipher mergetool navigation", function()
         local s = merge.current()
         -- ]x to the last conflict (the one that used to stick) and back, then confirm the
         -- bind is intact and the result cursor landed where nav put it
-        fire(s.result_buf, "dipher: next conflict")
-        fire(s.result_buf, "dipher: next conflict")
+        fire(s.result_buf, "differ: next conflict")
+        fire(s.result_buf, "differ: next conflict")
         assert.are.equal(s.regions[3].result_start, vim.api.nvim_win_get_cursor(s.result_win)[1])
         assert.is_true(vim.wo[s.result_win].scrollbind)
         for _, inp in ipairs(s.inputs) do
@@ -360,7 +360,7 @@ describe(":Dipher mergetool navigation", function()
     end)
 end)
 
-describe(":Dipher mergetool UX", function()
+describe(":Differ mergetool UX", function()
     after_each(function()
         if merge.current() then
             merge.close()
@@ -401,9 +401,9 @@ describe(":Dipher mergetool UX", function()
         end
         local lines = vim.api.nvim_buf_get_lines(s.result_buf, 0, -1, false)
         assert.are.equal("<<<<<<< HEAD", lines[2])
-        assert.are.equal("dipherMergeOursActive", hl_at(2))
-        assert.are.equal("dipherMergeTheirsActive", hl_at(4))
-        assert.are.equal("dipherMergeTheirsActive", hl_at(6))
+        assert.are.equal("differMergeOursActive", hl_at(2))
+        assert.are.equal("differMergeTheirsActive", hl_at(4))
+        assert.are.equal("differMergeTheirsActive", hl_at(6))
     end)
 
     it("colours the section bodies with the per-side groups", function()
@@ -427,8 +427,8 @@ describe(":Dipher mergetool UX", function()
             end
         end
         -- the active conflict (under the cursor on land) paints at full strength
-        assert.are.equal("dipherMergeOursActive", hl_at(3))
-        assert.are.equal("dipherMergeTheirsActive", hl_at(5))
+        assert.are.equal("differMergeOursActive", hl_at(3))
+        assert.are.equal("differMergeTheirsActive", hl_at(5))
     end)
 
     it("sets a winbar on the merge windows", function()
@@ -491,7 +491,7 @@ describe(":Dipher mergetool UX", function()
         vim.cmd.edit(root .. "/f.txt")
         merge.open({})
         local s = merge.current()
-        assert.is_true(fire(s.result_buf, "dipher: take ours"))
+        assert.is_true(fire(s.result_buf, "differ: take ours"))
         local during = vim.api.nvim_buf_get_extmarks(s.result_buf, flash_ns, 0, -1, {})
         assert.is_true(#during > 0)
         vim.wait(400, function()

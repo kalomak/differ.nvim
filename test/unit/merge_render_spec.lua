@@ -1,4 +1,4 @@
-local merge = require("dipher.render.merge")
+local merge = require("differ.render.merge")
 
 -- a default-style model: ours/theirs slabs, no base. result carries the markers
 local function model()

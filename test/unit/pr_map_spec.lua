@@ -1,4 +1,4 @@
-local pr = require("dipher.pr")
+local pr = require("differ.pr")
 
 describe("pr.map_files", function()
     it("translates github status words to single-letter codes", function()

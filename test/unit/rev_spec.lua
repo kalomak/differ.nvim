@@ -1,4 +1,4 @@
-local rev = require("dipher.git.rev")
+local rev = require("differ.git.rev")
 
 describe("git.rev.source", function()
     it("defaults to HEAD vs worktree (uncommitted changes)", function()

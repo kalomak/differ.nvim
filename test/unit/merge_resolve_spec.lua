@@ -1,5 +1,5 @@
-local resolve = require("dipher.merge.resolve")
-local conflict = require("dipher.git.conflict")
+local resolve = require("differ.merge.resolve")
+local conflict = require("differ.git.conflict")
 
 -- a two-conflict default-style file
 local FILE = {

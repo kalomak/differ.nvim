@@ -1,4 +1,4 @@
-local tree = require("dipher.panel.tree")
+local tree = require("differ.panel.tree")
 
 local function entry(path, status)
     return { path = path, status = status or "M", additions = 0, deletions = 0 }
@@ -6,13 +6,13 @@ end
 
 describe("panel.tree.build", function()
     it("folds single-child directory chains", function()
-        local root = tree.build({ entry("lua/dipher/git/init.lua") })
-        -- the whole chain collapses to one dir node "lua/dipher/git"
+        local root = tree.build({ entry("lua/differ/git/init.lua") })
+        -- the whole chain collapses to one dir node "lua/differ/git"
         assert.are.equal(1, #root.children)
         local dir = root.children[1]
         assert.are.equal("dir", dir.kind)
-        assert.are.equal("lua/dipher/git", dir.name)
-        assert.are.equal("lua/dipher/git", dir.path)
+        assert.are.equal("lua/differ/git", dir.name)
+        assert.are.equal("lua/differ/git", dir.path)
         assert.are.equal("init.lua", dir.children[1].name)
     end)
 

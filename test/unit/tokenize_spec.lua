@@ -1,4 +1,4 @@
-local tokenize = require("dipher.worddiff.tokenize")
+local tokenize = require("differ.worddiff.tokenize")
 
 local function texts(tokens)
     local out = {}

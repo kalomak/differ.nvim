@@ -3,7 +3,7 @@ package github
 import (
 	"context"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // MergePR merges the PR with the given method (MERGE / SQUASH / REBASE). it pre-flights

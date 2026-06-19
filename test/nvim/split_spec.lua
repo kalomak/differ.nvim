@@ -1,8 +1,8 @@
 -- runs under headless nvim: feeds real vim.text.diff output through the split
 -- renderer and asserts both columns stay aligned and each side's map round-trips
-local diff = require("dipher.model.diff")
-local split = require("dipher.render.split")
-local text_util = require("dipher.util.text")
+local diff = require("differ.model.diff")
+local split = require("differ.render.split")
+local text_util = require("differ.util.text")
 
 local function build(old_text, new_text)
     return diff.build({

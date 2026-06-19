@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // the github package is the single producer of mapped I/O codes (auth, not_found,

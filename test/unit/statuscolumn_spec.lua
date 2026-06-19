@@ -1,6 +1,6 @@
-local stacked = require("dipher.render.stacked")
-local split = require("dipher.render.split")
-local statuscolumn = require("dipher.ui.statuscolumn")
+local stacked = require("differ.render.stacked")
+local split = require("differ.render.split")
+local statuscolumn = require("differ.ui.statuscolumn")
 
 local FULL = math.huge
 

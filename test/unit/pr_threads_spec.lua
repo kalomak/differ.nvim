@@ -1,4 +1,4 @@
-local threads = require("dipher.pr.threads")
+local threads = require("differ.pr.threads")
 
 describe("pr.threads.side_of", function()
     it("maps github LEFT/RIGHT to the line-map column side", function()

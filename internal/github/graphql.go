@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // graphql posts a raw GraphQL query (§7.5: no go-gh, no typed dep) and decodes

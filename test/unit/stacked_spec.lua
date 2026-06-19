@@ -1,4 +1,4 @@
-local stacked = require("dipher.render.stacked")
+local stacked = require("differ.render.stacked")
 
 -- hand-built models use the vim.text.diff index convention (verified against the
 -- engine): pure insertions report old_count==0 with old_start at the preceding

@@ -1,5 +1,5 @@
-local conflict = require("dipher.git.conflict")
-local rev = require("dipher.git.rev")
+local conflict = require("differ.git.conflict")
+local rev = require("differ.git.rev")
 
 -- a conflicted file as line arrays. labels after the markers are arbitrary (git
 -- appends the ref); the parser must ignore them

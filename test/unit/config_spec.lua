@@ -1,4 +1,4 @@
-local config = require("dipher.config")
+local config = require("differ.config")
 
 describe("config.resolve_keymaps", function()
     it("applies the shared defaults to every surface", function()

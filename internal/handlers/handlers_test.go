@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/github"
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/github"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // mockAPI records what it was called with so handler routing/validation can be
@@ -350,7 +350,8 @@ func TestDiscardReviewRequiresReviewID(t *testing.T) {
 func TestPostCommentRoutes(t *testing.T) {
 	m := &mockAPI{}
 	res, err := deps(m).postComment(context.Background(), json.RawMessage(
-		`{"owner":"o","repo":"r","number":3,"path":"a.go","side":"RIGHT","line":8,"start_line":4,"body":"nit","review_id":"PRR_1"}`))
+		`{"owner":"o","repo":"r","number":3,"path":"a.go","side":"RIGHT","line":8,"start_line":4,"body":"nit","review_id":"PRR_1"}`,
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +367,8 @@ func TestPostCommentRoutes(t *testing.T) {
 func TestPostCommentReplyRoutes(t *testing.T) {
 	m := &mockAPI{}
 	_, err := deps(m).postComment(context.Background(), json.RawMessage(
-		`{"owner":"o","repo":"r","number":3,"in_reply_to":"PRT_5","body":"thanks"}`))
+		`{"owner":"o","repo":"r","number":3,"in_reply_to":"PRT_5","body":"thanks"}`,
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +400,8 @@ func TestPostCommentSkipsHeadGuardWhenUnpinned(t *testing.T) {
 func TestPostCommentPassesHeadGuardOnMatch(t *testing.T) {
 	m := &mockAPI{headSHA: "abc123"}
 	_, err := deps(m).postComment(context.Background(), json.RawMessage(
-		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`)))
+		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`),
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,7 +416,8 @@ func TestPostCommentPassesHeadGuardOnMatch(t *testing.T) {
 func TestPostCommentConflictsOnMovedHead(t *testing.T) {
 	m := &mockAPI{headSHA: "moved"}
 	_, err := deps(m).postComment(context.Background(), json.RawMessage(
-		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`)))
+		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`),
+	))
 	wantConflict(t, err)
 	if m.gotComment.Body != "" {
 		t.Error("a moved head must reject before posting the comment")
@@ -424,7 +428,8 @@ func TestPostCommentConflictsOnMovedHead(t *testing.T) {
 func TestPostCommentPropagatesHeadError(t *testing.T) {
 	m := &mockAPI{headErr: protocol.NewError(protocol.CodeNetwork, "boom")}
 	_, err := deps(m).postComment(context.Background(), json.RawMessage(
-		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`)))
+		fmt.Sprintf(postCommentBody, `,"expected_head":"abc123"`),
+	))
 	var pe *protocol.Error
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeNetwork {
 		t.Fatalf("want network error, got %v", err)
@@ -437,7 +442,8 @@ func TestPostCommentPropagatesHeadError(t *testing.T) {
 func TestSubmitReviewConflictsOnMovedHead(t *testing.T) {
 	m := &mockAPI{headSHA: "moved"}
 	_, err := deps(m).submitReview(context.Background(), json.RawMessage(
-		`{"owner":"o","repo":"r","number":3,"review_id":"PRR_1","event":"APPROVE","body":"lgtm","expected_head":"abc123"}`))
+		`{"owner":"o","repo":"r","number":3,"review_id":"PRR_1","event":"APPROVE","body":"lgtm","expected_head":"abc123"}`,
+	))
 	wantConflict(t, err)
 	if m.gotReviewID != "" {
 		t.Error("a moved head must reject before submitting the review")
@@ -447,7 +453,8 @@ func TestSubmitReviewConflictsOnMovedHead(t *testing.T) {
 func TestSubmitReviewPassesHeadGuardOnMatch(t *testing.T) {
 	m := &mockAPI{headSHA: "abc123"}
 	_, err := deps(m).submitReview(context.Background(), json.RawMessage(
-		`{"owner":"o","repo":"r","number":3,"review_id":"PRR_1","event":"APPROVE","body":"lgtm","expected_head":"abc123"}`))
+		`{"owner":"o","repo":"r","number":3,"review_id":"PRR_1","event":"APPROVE","body":"lgtm","expected_head":"abc123"}`,
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +466,8 @@ func TestSubmitReviewPassesHeadGuardOnMatch(t *testing.T) {
 func TestDeleteCommentRoutes(t *testing.T) {
 	m := &mockAPI{}
 	_, err := deps(m).deleteComment(context.Background(), json.RawMessage(
-		`{"owner":"o","repo":"r","number":3,"comment_id":"PRRC_8"}`))
+		`{"owner":"o","repo":"r","number":3,"comment_id":"PRRC_8"}`,
+	))
 	if err != nil {
 		t.Fatal(err)
 	}

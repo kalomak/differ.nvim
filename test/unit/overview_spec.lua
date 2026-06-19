@@ -1,4 +1,4 @@
-local overview = require("dipher.ui.overview")
+local overview = require("differ.ui.overview")
 
 -- inject a deterministic reltime so the golden lines don't depend on the clock
 local function build(data)
@@ -118,10 +118,10 @@ end)
 
 describe("ui.overview.build (verdict mapping)", function()
     local CASES = {
-        { state = "APPROVED", label = "approved", hl = "dipherOverviewApproved" },
-        { state = "CHANGES_REQUESTED", label = "requested changes", hl = "dipherOverviewChanges" },
-        { state = "COMMENTED", label = "commented", hl = "dipherOverviewMeta" },
-        { state = "DISMISSED", label = "review dismissed", hl = "dipherOverviewMeta" },
+        { state = "APPROVED", label = "approved", hl = "differOverviewApproved" },
+        { state = "CHANGES_REQUESTED", label = "requested changes", hl = "differOverviewChanges" },
+        { state = "COMMENTED", label = "commented", hl = "differOverviewMeta" },
+        { state = "DISMISSED", label = "review dismissed", hl = "differOverviewMeta" },
     }
     for _, c in ipairs(CASES) do
         it("maps " .. c.state .. " to its label + highlight", function()
@@ -219,7 +219,7 @@ describe("ui.overview.build (highlight spans align)", function()
         local title = "#42 add the overview"
         local span
         for _, h in ipairs(built.highlights) do
-            if h.row == 0 and h.hl == "dipherOverviewTitle" then
+            if h.row == 0 and h.hl == "differOverviewTitle" then
                 span = h
             end
         end

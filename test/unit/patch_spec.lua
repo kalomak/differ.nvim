@@ -1,4 +1,4 @@
-local patch = require("dipher.git.patch")
+local patch = require("differ.git.patch")
 
 describe("patch.hunk", function()
     it("builds a zero-context patch for a one-line modification", function()

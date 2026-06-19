@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 type helloParams struct {
@@ -29,7 +29,7 @@ func (d Deps) hello(_ context.Context, params json.RawMessage) (any, error) {
 	if p.Protocol > protocol.Version {
 		return nil, protocol.NewError(protocol.CodeBadRequest,
 			"protocol mismatch: client speaks "+strconv.Itoa(p.Protocol)+
-				", sidecar speaks "+strconv.Itoa(protocol.Version)+", rebuild your sidecar (:Dipher build)")
+				", sidecar speaks "+strconv.Itoa(protocol.Version)+", rebuild your sidecar (:Differ build)")
 	}
 	return helloResult{Protocol: protocol.Version, Binary: protocol.Binary}, nil
 }

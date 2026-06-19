@@ -3,7 +3,7 @@ package github
 import (
 	"context"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // prAndPendingReview returns the PR node id and the viewer's existing pending review

@@ -1,10 +1,10 @@
-local repo = require("dipher.pr.repo")
+local repo = require("differ.pr.repo")
 
 describe("pr.repo.parse_remote", function()
     it("parses an scp-style git@github.com remote", function()
         assert.are.same(
-            { owner = "seanhalberthal", repo = "dipher.nvim" },
-            repo.parse_remote("git@github.com:seanhalberthal/dipher.nvim.git")
+            { owner = "seanhalberthal", repo = "differ.nvim" },
+            repo.parse_remote("git@github.com:seanhalberthal/differ.nvim.git")
         )
     end)
 

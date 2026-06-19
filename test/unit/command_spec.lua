@@ -1,4 +1,4 @@
--- :Dipher pr command-surface routing (slice 7). a fake dipher.pr records which verb the
+-- :Differ pr command-surface routing (slice 7). a fake differ.pr records which verb the
 -- dispatch reached so the routing and the tree-aware completion are unit-checked without a
 -- nvim runtime. the fake is swapped into package.loaded per test; the with_session block
 -- loads the real module under stub deps to check the no-session guard
@@ -90,22 +90,22 @@ local function has(set, value)
     return false
 end
 
-describe(":Dipher pr dispatch", function()
+describe(":Differ pr dispatch", function()
     local cmd
 
     before_each(function()
         calls = {}
         notifs = {}
-        package.loaded["dipher.view"] = { current = function() end }
-        package.loaded["dipher.pr"] = FAKE_PR
-        package.loaded["dipher.command"] = nil
-        cmd = require("dipher.command")
+        package.loaded["differ.view"] = { current = function() end }
+        package.loaded["differ.pr"] = FAKE_PR
+        package.loaded["differ.command"] = nil
+        cmd = require("differ.command")
     end)
 
     after_each(function()
-        package.loaded["dipher.command"] = nil
-        package.loaded["dipher.pr"] = nil
-        package.loaded["dipher.view"] = nil
+        package.loaded["differ.command"] = nil
+        package.loaded["differ.pr"] = nil
+        package.loaded["differ.view"] = nil
     end)
 
     it("opens the picker on the overview when given no verb", function()
@@ -220,35 +220,35 @@ describe("M.complete (pr tree)", function()
     local cmd
 
     before_each(function()
-        package.loaded["dipher.view"] = { current = function() end }
-        package.loaded["dipher.pr"] = FAKE_PR
-        package.loaded["dipher.command"] = nil
-        cmd = require("dipher.command")
+        package.loaded["differ.view"] = { current = function() end }
+        package.loaded["differ.pr"] = FAKE_PR
+        package.loaded["differ.command"] = nil
+        cmd = require("differ.command")
     end)
 
     after_each(function()
-        package.loaded["dipher.command"] = nil
-        package.loaded["dipher.pr"] = nil
-        package.loaded["dipher.view"] = nil
+        package.loaded["differ.command"] = nil
+        package.loaded["differ.pr"] = nil
+        package.loaded["differ.view"] = nil
     end)
 
     it("offers the review actions after `pr review `", function()
         assert.are.same(
             { "start", "submit", "discard", "resume" },
-            cmd.complete("", "Dipher pr review ")
+            cmd.complete("", "Differ pr review ")
         )
     end)
 
     it("filters the review actions by the lead", function()
-        assert.are.same({ "start", "submit" }, cmd.complete("s", "Dipher pr review s"))
+        assert.are.same({ "start", "submit" }, cmd.complete("s", "Differ pr review s"))
     end)
 
     it("offers the merge methods after `pr merge `", function()
-        assert.are.same({ "squash", "merge", "rebase" }, cmd.complete("", "Dipher pr merge "))
+        assert.are.same({ "squash", "merge", "rebase" }, cmd.complete("", "Differ pr merge "))
     end)
 
     it("drops resolve/reply/delete from the first-level pr verbs", function()
-        local pool = cmd.complete("", "Dipher pr ")
+        local pool = cmd.complete("", "Differ pr ")
         assert.is_true(has(pool, "review"))
         assert.is_true(has(pool, "checks"))
         assert.is_false(has(pool, "resolve"))
@@ -260,7 +260,7 @@ describe("M.complete (pr tree)", function()
     end)
 
     it("offers the subcommands (incl. base) at the first token", function()
-        local pool = cmd.complete("", "Dipher ")
+        local pool = cmd.complete("", "Differ ")
         assert.is_true(has(pool, "pr"))
         assert.is_true(has(pool, "base"))
     end)
@@ -270,18 +270,18 @@ describe("pr.with_session", function()
     local real
 
     setup(function()
-        package.loaded["dipher.pr"] = nil
-        package.loaded["dipher.pr.repo"] = package.loaded["dipher.pr.repo"] or {}
-        package.loaded["dipher.pr.client"] = package.loaded["dipher.pr.client"] or {}
-        package.loaded["dipher.pr.viewed"] = package.loaded["dipher.pr.viewed"] or {}
-        real = require("dipher.pr")
+        package.loaded["differ.pr"] = nil
+        package.loaded["differ.pr.repo"] = package.loaded["differ.pr.repo"] or {}
+        package.loaded["differ.pr.client"] = package.loaded["differ.pr.client"] or {}
+        package.loaded["differ.pr.viewed"] = package.loaded["differ.pr.viewed"] or {}
+        real = require("differ.pr")
     end)
 
     teardown(function()
-        package.loaded["dipher.pr"] = nil
-        package.loaded["dipher.pr.repo"] = nil
-        package.loaded["dipher.pr.client"] = nil
-        package.loaded["dipher.pr.viewed"] = nil
+        package.loaded["differ.pr"] = nil
+        package.loaded["differ.pr.repo"] = nil
+        package.loaded["differ.pr.client"] = nil
+        package.loaded["differ.pr.viewed"] = nil
     end)
 
     before_each(function()
@@ -295,6 +295,6 @@ describe("pr.with_session", function()
         end)
         assert.is_false(ran)
         assert.are.equal(1, #notifs)
-        assert.are.equal("dipher: no active pull request", notifs[1].msg)
+        assert.are.equal("differ: no active pull request", notifs[1].msg)
     end)
 end)

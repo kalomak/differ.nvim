@@ -1,8 +1,8 @@
 -- runs under headless nvim against a throwaway git repo: exercises the local git
 -- source end-to-end (content reads, changed-file listing, rename handling,
--- merge-base resolution, and the :Dipher picker building a correct DiffModel)
-local git_src = require("dipher.git")
-local rev = require("dipher.git.rev")
+-- merge-base resolution, and the :Differ picker building a correct DiffModel)
+local git_src = require("differ.git")
+local rev = require("differ.git.rev")
 
 -- run git in `cwd`, asserting success. identity is pinned inline so commits work
 -- in CI without a global gitconfig
@@ -81,8 +81,8 @@ describe("git.open_file", function()
     end)
 end)
 
-describe(":Dipher panel", function()
-    local Panel = require("dipher.panel")
+describe(":Differ panel", function()
+    local Panel = require("differ.panel")
 
     -- 1-based line of the file row for `path` (optionally pinned to a staged/unstaged
     -- section), located via the panel's meta so tests don't hardcode header offsets
@@ -125,7 +125,7 @@ describe(":Dipher panel", function()
         assert.is_false(p:is_open())
 
         -- `panel set` reveals a hidden sidebar at the requested position
-        require("dipher.command").panel("set", "right")
+        require("differ.command").panel("set", "right")
         assert.are.equal(p, Panel.current())
         assert.is_true(p:is_open())
         assert.are.equal("right", p.position)
@@ -137,7 +137,7 @@ describe(":Dipher panel", function()
         assert.are.equal(p, Panel.current())
         assert.is_true(p:is_open())
 
-        require("dipher.git").close() -- :Dipher close ends the session
+        require("differ.git").close() -- :Differ close ends the session
         assert.is_nil(Panel.current())
     end)
 
@@ -159,7 +159,7 @@ describe(":Dipher panel", function()
         assert.is_false(p:is_open())
 
         vim.api.nvim_set_current_win(p.origin_win)
-        local v = require("dipher.view").current()
+        local v = require("differ.view").current()
         v:step_file("next") -- ]f with no sidebar window to read the cursor from
         assert.are.equal("z.lua", v.model.path)
         assert.are.equal(file_line(p, "z.lua"), p.selected_row)
@@ -169,7 +169,7 @@ describe(":Dipher panel", function()
         assert.are.equal("a.lua", v.model.path)
         assert.are.equal(file_line(p, "a.lua"), p.selected_row)
 
-        require("dipher.git").close()
+        require("differ.git").close()
     end)
 
     it("the panel winbar reports the cursor's file position", function()
@@ -184,7 +184,7 @@ describe(":Dipher panel", function()
 
         git_src.panel({ rev = {}, open_first = true })
         local p = Panel.current()
-        local winbar = require("dipher.ui.winbar")
+        local winbar = require("differ.ui.winbar")
         vim.g.statusline_winid = p.winid
         vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "a.lua"), 0 })
         assert.is_truthy(winbar.panel():find("file 1/2", 1, true))
@@ -206,9 +206,9 @@ describe(":Dipher panel", function()
         -- the diff opened in a fresh tabpage; the invoking tab is untouched
         assert.are.equal(ntabs + 1, #vim.api.nvim_list_tabpages())
         assert.are_not.equal(origin_tab, vim.api.nvim_get_current_tabpage())
-        assert.matches("dipher://", vim.api.nvim_buf_get_name(0))
+        assert.matches("differ://", vim.api.nvim_buf_get_name(0))
 
-        require("dipher.git").close()
+        require("differ.git").close()
         -- back in the origin tab, original buffer intact, the session tab dropped
         assert.are.equal(ntabs, #vim.api.nvim_list_tabpages())
         assert.are.equal(origin_tab, vim.api.nvim_get_current_tabpage())
@@ -269,7 +269,7 @@ describe(":Dipher panel", function()
         git_src.panel({}) -- toggle hides the sidebar (closes the panel window)
         vim.wait(100) -- give any (wrongly) scheduled teardown a chance to fire
         assert.are.equal(p, Panel.current()) -- still the same live session
-        require("dipher.git").close()
+        require("differ.git").close()
     end)
 
     it("opens the real file in the origin tab on jump-to-file (gofile)", function()
@@ -280,7 +280,7 @@ describe(":Dipher panel", function()
         local ntabs = #vim.api.nvim_list_tabpages()
 
         git_src.panel({ open_first = true })
-        require("dipher").jump_to_file()
+        require("differ").jump_to_file()
         -- the session tab is gone and we're back in the origin tab on the real file
         assert.are.equal(ntabs, #vim.api.nvim_list_tabpages())
         assert.are.equal(origin_tab, vim.api.nvim_get_current_tabpage())
@@ -294,7 +294,7 @@ describe(":Dipher panel", function()
         vim.cmd.edit(root .. "/a.lua")
 
         git_src.panel({ open_first = true })
-        local col = require("dipher.view").current().columns[1]
+        local col = require("differ.view").current().columns[1]
         local brow
         for i, l in ipairs(col.map.lines) do
             if l.new == 2 then -- buffer row of new-side line 2
@@ -304,7 +304,7 @@ describe(":Dipher panel", function()
         end
         assert.is_not_nil(brow)
         vim.api.nvim_win_set_cursor(col.winid, { brow, 6 }) -- the "a" of "answer"
-        require("dipher").jump_to_file()
+        require("differ").jump_to_file()
 
         assert.are.equal("a.lua", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"))
         assert.are.same({ 2, 6 }, vim.api.nvim_win_get_cursor(0)) -- exact line + column
@@ -381,7 +381,7 @@ describe(":Dipher panel", function()
             local p = Panel.current()
             assert.is_not_nil(file_line(p, "a.lua")) -- listed as modified
 
-            git(root, "commit", "-q", "-am", "external change") -- committed outside dipher
+            git(root, "commit", "-q", "-am", "external change") -- committed outside differ
             -- scoped to the panel's group so the headless harness's own TermClose
             -- handler stays out of it
             vim.api.nvim_exec_autocmds(ev, { group = p.augroup })
@@ -417,7 +417,7 @@ describe(":Dipher panel", function()
         git_src.panel({})
         local p = Panel.current()
         local origin_buf = vim.api.nvim_win_get_buf(p.origin_win)
-        git(root, "checkout", "HEAD", "--", "a.lua") -- revert outside dipher → stale entry
+        git(root, "checkout", "HEAD", "--", "a.lua") -- revert outside differ → stale entry
 
         vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "a.lua"), 0 })
         p:select()
@@ -441,7 +441,7 @@ describe(":Dipher panel", function()
         -- window's buffer (View.current keys off the focused buffer)
         local function view_in_origin()
             vim.api.nvim_set_current_win(p.origin_win)
-            return require("dipher.view").current()
+            return require("differ.view").current()
         end
         -- a.lua is "MM": it appears in both the Staged and Unstaged sections
         vim.api.nvim_win_set_cursor(p.winid, { file_line(p, "a.lua", true), 0 })
@@ -459,8 +459,8 @@ describe(":Dipher panel", function()
     end)
 end)
 
-describe(":Dipher panel staging (§8.6 slice C)", function()
-    local Panel = require("dipher.panel")
+describe(":Differ panel staging (§8.6 slice C)", function()
+    local Panel = require("differ.panel")
 
     -- the FileEntry for `path`, optionally pinned to staged/unstaged, via the panel
     -- meta (which is rebuilt by refresh after each op)
@@ -599,24 +599,24 @@ describe(":Dipher panel staging (§8.6 slice C)", function()
         local root = fresh_repo()
         write(root .. "/a.lua", "local x = 2\nreturn x\n")
         vim.cmd.edit(root .. "/a.lua")
-        require("dipher").setup({ keymaps = { panel = { discard = false } } })
+        require("differ").setup({ keymaps = { panel = { discard = false } } })
         git_src.panel({})
         local p = Panel.current()
         local lhs = keymaps(p)
         assert.is_nil(lhs["X"]) -- discard disabled
         assert.is_true(lhs["s"]) -- other staging keys unaffected
         p:close()
-        require("dipher").setup({}) -- restore defaults for the rest of the suite
+        require("differ").setup({}) -- restore defaults for the rest of the suite
     end)
 end)
 
-describe(":Dipher diff hunk staging (§8.1)", function()
-    local Panel = require("dipher.panel")
+describe(":Differ diff hunk staging (§8.1)", function()
+    local Panel = require("differ.panel")
 
     -- p:select returns focus to the panel, so the View lives in the origin window
     local function view_in_origin(p)
         vim.api.nvim_set_current_win(p.origin_win)
-        return require("dipher.view").current()
+        return require("differ.view").current()
     end
     -- the staged (index) content of `path`
     local function indexed(root, path)
@@ -724,7 +724,7 @@ describe(":Dipher diff hunk staging (§8.1)", function()
         local v = view_in_origin(p)
         assert.are.equal("local x = 2\nreturn x\n", v.model.new_text)
 
-        -- outside dipher: edit the viewed file further, and change git state (stage a
+        -- outside differ: edit the viewed file further, and change git state (stage a
         -- second file) so the signature moves and the refresh fires
         write(root .. "/a.lua", "local x = 99\nreturn x\n")
         write(root .. "/b.lua", "new\n")
@@ -783,7 +783,7 @@ describe(":Dipher diff hunk staging (§8.1)", function()
         p:close()
     end)
 
-    it("follows a file to its staged side when staged wholesale outside dipher", function()
+    it("follows a file to its staged side when staged wholesale outside differ", function()
         local root = fresh_repo()
         write(root .. "/a.lua", "local x = 2\nreturn x\n") -- a.lua modified, unstaged
         vim.cmd.edit(root .. "/a.lua")
@@ -1096,13 +1096,13 @@ describe(":Dipher diff hunk staging (§8.1)", function()
         write(root .. "/a.lua", "local x = 2\nreturn x\n")
         vim.cmd.edit(root .. "/a.lua")
 
-        -- default `:Dipher` is HEAD↔worktree (uncommitted): df is bound
+        -- default `:Differ` is HEAD↔worktree (uncommitted): df is bound
         git_src.panel({ rev = {}, open_first = true })
         local p = Panel.current()
         assert.is_true(keymaps(view_in_origin(p).columns[1].bufnr)["df"])
         p:close()
 
-        -- commit so the worktree is clean, then `:Dipher HEAD~1` is <rev>↔worktree:
+        -- commit so the worktree is clean, then `:Differ HEAD~1` is <rev>↔worktree:
         -- it folds in committed history, so edit-in-review must be off (df unbound)
         git(root, "commit", "-q", "-am", "edit")
         git_src.panel({ rev = "HEAD~1", open_first = true })
@@ -1116,8 +1116,8 @@ describe(":Dipher diff hunk staging (§8.1)", function()
     end)
 end)
 
-describe(":Dipher panel <-> diff wiring", function()
-    local Panel = require("dipher.panel")
+describe(":Differ panel <-> diff wiring", function()
+    local Panel = require("differ.panel")
 
     it("opens with the cursor in the diff window, not the panel", function()
         local root = fresh_repo()
@@ -1149,7 +1149,7 @@ describe(":Dipher panel <-> diff wiring", function()
         -- from the panel, ]c moves the diff window's cursor to the next hunk
         vim.api.nvim_set_current_win(p.winid)
         vim.api.nvim_win_set_cursor(p.origin_win, { 1, 0 })
-        require("dipher").goto_hunk("next")
+        require("differ").goto_hunk("next")
         assert.are.equal(9, vim.api.nvim_win_get_cursor(p.origin_win)[1]) -- second hunk
         p:close()
     end)
@@ -1161,9 +1161,9 @@ describe(":Dipher panel <-> diff wiring", function()
         git_src.panel({ rev = {}, open_first = true })
         local p = Panel.current()
         vim.api.nvim_set_current_win(p.winid) -- focus the panel
-        assert.is_not_nil(require("dipher").active_view())
+        assert.is_not_nil(require("differ").active_view())
 
-        require("dipher").jump_to_file()
+        require("differ").jump_to_file()
         local cur = vim.api.nvim_get_current_buf()
         assert.are.equal("a.lua", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(cur), ":t"))
         assert.are.equal("", vim.bo[cur].buftype) -- the real file
@@ -1171,13 +1171,13 @@ describe(":Dipher panel <-> diff wiring", function()
     end)
 end)
 
-describe(":Dipher (open_first)", function()
-    local Panel = require("dipher.panel")
+describe(":Differ (open_first)", function()
+    local Panel = require("differ.panel")
 
     -- p:select returns focus to the panel, so the View lives in the origin window
     local function view_in_origin(p)
         vim.api.nvim_set_current_win(p.origin_win)
-        return require("dipher.view").current()
+        return require("differ.view").current()
     end
 
     it("opens the panel and the first file's diff (DiffviewOpen-style)", function()
@@ -1248,14 +1248,14 @@ describe(":Dipher (open_first)", function()
         git_src.panel({ rev = {}, open_first = true })
         local p = Panel.current()
         vim.api.nvim_set_current_win(p.origin_win) -- emulate cursor in the diff window
-        local v = require("dipher.view").current()
+        local v = require("differ.view").current()
         local first = v.model.path
 
         v:step_file("next")
         -- focus stayed in the diff window (not bounced to the panel)
         assert.are.equal(p.origin_win, vim.api.nvim_get_current_win())
         -- and the one view re-sourced to a different file
-        assert.are_not.equal(first, require("dipher.view").current().model.path)
+        assert.are_not.equal(first, require("differ.view").current().model.path)
         p:close()
     end)
 
@@ -1269,13 +1269,13 @@ describe(":Dipher (open_first)", function()
         git_src.panel({ rev = {}, open_first = true })
         local p = Panel.current()
         vim.api.nvim_set_current_win(p.origin_win)
-        local v = require("dipher.view").current()
+        local v = require("differ.view").current()
         assert.are.equal("a.lua", v.model.path)
 
         v:step_file("next") -- ]f past the last file wraps to the first
-        assert.are.equal("z.lua", require("dipher.view").current().model.path)
+        assert.are.equal("z.lua", require("differ.view").current().model.path)
         v:step_file("prev") -- [f past the first wraps back to the last
-        assert.are.equal("a.lua", require("dipher.view").current().model.path)
+        assert.are.equal("a.lua", require("differ.view").current().model.path)
         p:close()
     end)
 

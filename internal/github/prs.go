@@ -4,7 +4,7 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
 // ListPRs returns open PRs filtered by open/mine/review_requested. mine and

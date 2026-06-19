@@ -2,8 +2,8 @@
 -- history (§8.4, dp): the range commit walk, per-commit file listing (incl. a root
 -- commit), the panel expanding commits to nested files, on_file driving the view,
 -- and ]f/[f walking files across commits
-local git_src = require("dipher.git")
-local History = require("dipher.history")
+local git_src = require("differ.git")
+local History = require("differ.history")
 
 local function git(cwd, ...)
     local args =
@@ -49,7 +49,7 @@ end
 
 local function view_in_origin(h)
     vim.api.nvim_set_current_win(h.origin_win)
-    return require("dipher.view").current()
+    return require("differ.view").current()
 end
 
 describe("git.range_commits / commit_files", function()
@@ -84,7 +84,7 @@ describe("git.range_commits / commit_files", function()
     end)
 end)
 
-describe(":Dipher log <range> (branch-range history)", function()
+describe(":Differ log <range> (branch-range history)", function()
     it("opens an expandable commit panel showing the newest commit's first file", function()
         local root = repo_with_branch()
         vim.cmd.edit(root .. "/a.lua")

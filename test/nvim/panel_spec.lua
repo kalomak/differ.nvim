@@ -1,7 +1,7 @@
 -- runs under headless nvim: drives the Panel component through a real window
 -- (rendering, selection callback, fold, and the runtime listing/position API).
 -- fed plain FileEntry lists (no git), since the panel is source-agnostic
-local Panel = require("dipher.panel")
+local Panel = require("differ.panel")
 
 local function fe(path, status)
     return { path = path, status = status or "M", additions = 0, deletions = 0 }
@@ -104,7 +104,7 @@ describe("panel navigation", function()
     end)
 
     it("the file total stays accurate when everything is collapsed", function()
-        local winbar = require("dipher.ui.winbar")
+        local winbar = require("differ.ui.winbar")
         local p = panel({ fe("src/a.lua"), fe("src/sub/b.lua") })
         p:open()
         p:set_all_folds(true) -- no file rows visible now

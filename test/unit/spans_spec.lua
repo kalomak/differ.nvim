@@ -1,4 +1,4 @@
-local spans = require("dipher.worddiff.spans")
+local spans = require("differ.worddiff.spans")
 
 describe("worddiff.spans.emit (word)", function()
     it("emits no spans for identical lines", function()

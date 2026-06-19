@@ -1,4 +1,4 @@
-local pair = require("dipher.worddiff.pair")
+local pair = require("differ.worddiff.pair")
 
 describe("worddiff.pair.similarity", function()
     it("is 1 for identical lines", function()

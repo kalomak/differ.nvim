@@ -1,4 +1,4 @@
-local comment = require("dipher.pr.comment")
+local comment = require("differ.pr.comment")
 
 -- a fixture line map: only `.lines[row] = { kind, old, new }` is read by the anchor
 -- helpers, so a plain table stands in for a rendered LineMap. a unified (stacked)

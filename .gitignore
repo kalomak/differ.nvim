@@ -1,4 +1,4 @@
-/dipher-sidecar
+/differ-sidecar
 /bin/
 *.o
 .luarc.local.json

@@ -1,4 +1,4 @@
-local project = require("dipher.syntax.project")
+local project = require("differ.syntax.project")
 
 describe("syntax.project", function()
     it("remaps source rows to buffer rows, preserving cols and hl", function()

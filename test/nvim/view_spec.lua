@@ -1,10 +1,10 @@
 -- runs under headless nvim: drives the View through real windows/buffers and
 -- asserts content, the diff highlight extmarks, and split scroll-binding
-local diff = require("dipher.model.diff")
-local View = require("dipher.view")
+local diff = require("differ.model.diff")
+local View = require("differ.view")
 
 -- nvim_create_namespace is idempotent by name, so this is the same ns the View uses
-local ns = vim.api.nvim_create_namespace("dipher")
+local ns = vim.api.nvim_create_namespace("differ")
 
 local function model(old, new)
     return diff.build({ path = "x", old_rev = "A", new_rev = "B", old_text = old, new_text = new })
@@ -43,8 +43,8 @@ describe("view stacked", function()
         assert.is_true(vim.wo[win].wrap) -- wrap defaults on
 
         local line_hl = extmarks(buf)
-        assert.are.equal("dipherLineDelete", line_hl[1]) -- "b" (old)
-        assert.are.equal("dipherLineAdd", line_hl[2]) -- "B" (new)
+        assert.are.equal("differLineDelete", line_hl[1]) -- "b" (old)
+        assert.are.equal("differLineAdd", line_hl[2]) -- "B" (new)
         assert.is_nil(line_hl[0]) -- "a" (context) unhighlighted
         v:close()
     end)
@@ -74,10 +74,10 @@ describe("view stacked", function()
             return x.hl < y.hl
         end)
         assert.are.equal(2, #word)
-        assert.are.equal("dipherWordAdd", word[1].hl)
+        assert.are.equal("differWordAdd", word[1].hl)
         assert.are.equal(6, word[1].col)
         assert.are.equal(9, word[1].end_col)
-        assert.are.equal("dipherWordDelete", word[2].hl)
+        assert.are.equal("differWordDelete", word[2].hl)
         v:close()
     end)
 end)
@@ -92,8 +92,8 @@ describe("view window options", function()
         })
         v:open()
         local win = v.columns[1].winid
-        -- the window carries dipher's dressing...
-        assert.is_truthy(vim.wo[win].statuscolumn:find("dipher", 1, true))
+        -- the window carries differ's dressing...
+        assert.is_truthy(vim.wo[win].statuscolumn:find("differ", 1, true))
         assert.is_false(vim.wo[win].number)
         -- ...but the global defaults are untouched, so other windows are unaffected
         assert.are.equal(g_statuscolumn, vim.go.statuscolumn)
@@ -122,8 +122,8 @@ describe("view split", function()
 
         local left_hl = extmarks(left.bufnr)
         local right_hl = extmarks(right.bufnr)
-        assert.are.equal("dipherLineDelete", left_hl[1]) -- old "M" on the left
-        assert.are.equal("dipherLineAdd", right_hl[1]) -- new "X" on the right
+        assert.are.equal("differLineDelete", left_hl[1]) -- old "M" on the left
+        assert.are.equal("differLineAdd", right_hl[1]) -- new "X" on the right
         v:close()
     end)
 end)
@@ -158,7 +158,7 @@ describe("view hunk navigation", function()
         local v = two_hunk_view()
         v:open()
         local win = v.columns[1].winid
-        local winbar = require("dipher.ui.winbar")
+        local winbar = require("differ.ui.winbar")
         vim.g.statusline_winid = win
         vim.api.nvim_win_set_cursor(win, { 2, 0 }) -- first hunk
         local s = winbar.diff()
@@ -228,7 +228,7 @@ describe("view in-view keymaps", function()
             layout = "stacked",
             context = math.huge,
             deep_diff = { enabled = true },
-            keymaps = require("dipher.config").resolve_keymaps({ next_hunk = "gh" }).diff,
+            keymaps = require("differ.config").resolve_keymaps({ next_hunk = "gh" }).diff,
         })
         v:open()
         local lhs = maps(v)
@@ -356,7 +356,7 @@ describe("view re-source", function()
         v:close()
     end)
 
-    it("names the stacked buffer dipher://<path> and renames on re-source", function()
+    it("names the stacked buffer differ://<path> and renames on re-source", function()
         local function named(path)
             return diff.build({
                 path = path,
@@ -375,11 +375,11 @@ describe("view re-source", function()
         local buf = v.columns[1].bufnr
         local name = vim.api.nvim_buf_get_name(buf)
         -- clean name: scheme + path only, no revs/side noise
-        assert.is_truthy(name:find("dipher://lua/a.lua", 1, true))
+        assert.is_truthy(name:find("differ://lua/a.lua", 1, true))
         assert.are.equal("a.lua", vim.fn.fnamemodify(name, ":t")) -- statusline shows the basename
 
         v:set_source(named("lua/b.lua"))
-        assert.is_truthy(vim.api.nvim_buf_get_name(buf):find("dipher://lua/b.lua", 1, true))
+        assert.is_truthy(vim.api.nvim_buf_get_name(buf):find("differ://lua/b.lua", 1, true))
         v:close()
     end)
 
@@ -391,10 +391,10 @@ describe("view re-source", function()
         })
         v:open()
         assert.is_truthy(
-            vim.api.nvim_buf_get_name(v.columns[1].bufnr):find("dipher://old/x", 1, true)
+            vim.api.nvim_buf_get_name(v.columns[1].bufnr):find("differ://old/x", 1, true)
         )
         assert.is_truthy(
-            vim.api.nvim_buf_get_name(v.columns[2].bufnr):find("dipher://new/x", 1, true)
+            vim.api.nvim_buf_get_name(v.columns[2].bufnr):find("differ://new/x", 1, true)
         )
         v:close()
     end)
@@ -417,7 +417,7 @@ describe("view re-source", function()
         v:open()
         local buf = v.columns[1].bufnr
         assert.are.equal("lua", vim.bo[buf].filetype)
-        assert.are.equal("OFF", vim.bo[buf].syntax) -- dipher paints its own syntax pass
+        assert.are.equal("OFF", vim.bo[buf].syntax) -- differ paints its own syntax pass
         v:set_source(named("bar.py")) -- filetype tracks the re-sourced file
         assert.are.equal("python", vim.bo[buf].filetype)
         v:close()
@@ -500,7 +500,7 @@ describe("view jump-to-file", function()
         assert.are.same({ "a", "B", "c" }, vim.api.nvim_buf_get_lines(cur, 0, -1, false))
         assert.are.equal(2, vim.api.nvim_win_get_cursor(0)[1])
         assert.is_false(vim.api.nvim_buf_is_valid(buf)) -- the diff buffer is gone
-        -- dipher's custom gutter is shed, so the real file's line numbers render
+        -- differ's custom gutter is shed, so the real file's line numbers render
         assert.are.equal("", vim.wo[win].statuscolumn)
     end)
 
@@ -703,12 +703,12 @@ describe("view edit-in-review", function()
 end)
 
 describe("view cursor-line overlay", function()
-    local cursor_ns = vim.api.nvim_create_namespace("dipher.cursorline")
+    local cursor_ns = vim.api.nvim_create_namespace("differ.cursorline")
 
     local function overlay_rows(buf)
         local rows = {}
         for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, cursor_ns, 0, -1, { details = true })) do
-            if m[4].hl_group == "dipherCursorLine" then
+            if m[4].hl_group == "differCursorLine" then
                 rows[#rows + 1] = m[2]
             end
         end
@@ -811,7 +811,7 @@ describe("view close guard", function()
 end)
 
 describe("command router", function()
-    local command = require("dipher.command")
+    local command = require("differ.command")
 
     it("dispatches layout + context against the current view", function()
         vim.cmd("silent! only")
@@ -833,7 +833,7 @@ describe("command router", function()
     end)
 
     it("completes subcommands and values", function()
-        local subs = command.complete("", "Dipher ")
+        local subs = command.complete("", "Differ ")
         table.sort(subs)
         assert.are.same({
             "base",
@@ -852,7 +852,7 @@ describe("command router", function()
         assert.are.same(
             { "split", "stacked" },
             (function()
-                local v = command.complete("s", "Dipher layout s")
+                local v = command.complete("s", "Differ layout s")
                 table.sort(v)
                 return v
             end)()

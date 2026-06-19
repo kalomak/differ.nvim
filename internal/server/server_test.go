@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/seanhalberthal/dipher.nvim/internal/handlers"
-	"github.com/seanhalberthal/dipher.nvim/internal/protocol"
+	"github.com/seanhalberthal/differ.nvim/internal/handlers"
+	"github.com/seanhalberthal/differ.nvim/internal/protocol"
 )
 
-const helloLine = `{"id":1,"method":"hello","params":{"client":"dipher.nvim","protocol":1}}`
+const helloLine = `{"id":1,"method":"hello","params":{"client":"differ.nvim","protocol":1}}`
 
 // drive runs the server over the given input lines and returns the responses in
 // the order they were written.

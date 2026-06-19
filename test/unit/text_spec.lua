@@ -1,4 +1,4 @@
-local text = require("dipher.util.text")
+local text = require("differ.util.text")
 
 describe("util.text.truncate_end", function()
     it("returns the string unchanged when it already fits", function()

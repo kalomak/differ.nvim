@@ -1,5 +1,5 @@
-local stacked = require("dipher.render.stacked")
-local nav = require("dipher.nav")
+local stacked = require("differ.render.stacked")
+local nav = require("differ.nav")
 
 -- two hunks far apart -> stacked (full context) buffer:
 --   1 ctx | 2 old"2" h1 | 3 new"X" h1 | 4-8 ctx | 9 old"8" h2 | 10 new"Y" h2 | 11 ctx
