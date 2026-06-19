@@ -162,17 +162,34 @@ end
 -- merge-tool region backgrounds (§8.5): one quiet tint per side so each conflict slab
 -- reads as that version (ours green, theirs blue, base muted) and the result's
 -- unresolved block stands out in the conflict orange. same blend recipe as the diff
--- line backgrounds, bg-only so native syntax shows through
+-- line backgrounds, bg-only so native syntax shows through. the UX-polish slice (§8.5)
+-- adds: active vs inactive intensities (the block under the cursor at full strength, the
+-- rest faint), the ▌ input-slab sign, a stronger input body tint, and the resolved flash
 ---@param p table<string, integer>
 ---@return table<string, vim.api.keyset.highlight>
 local function merge_groups(p)
     local base = bg_of({ "Normal" }, 0x14161b)
-    local w = 0.16
+    local w, active, strong = 0.16, 0.28, 0.24
     return {
         dipherMergeOurs = { bg = blend(p.green, base, w) },
         dipherMergeTheirs = { bg = blend(p.blue, base, w) },
         dipherMergeBase = { bg = blend(p.grey, base, w) },
         dipherMergeConflict = { bg = blend(p.orange, base, w) },
+        -- the conflict under the cursor: stronger per-side tint, colour at full strength
+        dipherMergeOursActive = { bg = blend(p.green, base, active) },
+        dipherMergeTheirsActive = { bg = blend(p.blue, base, active) },
+        dipherMergeBaseActive = { bg = blend(p.grey, base, active) },
+        dipherMergeMarker = { fg = p.grey },
+        -- the ▌ input-slab gutter sign, fg per side
+        dipherMergeSignOurs = { fg = p.green },
+        dipherMergeSignBase = { fg = p.grey },
+        dipherMergeSignTheirs = { fg = p.blue },
+        -- stronger input-pane slab body so the conflicting lines pop out of the full file
+        dipherMergeOursStrong = { bg = blend(p.green, base, strong) },
+        dipherMergeBaseStrong = { bg = blend(p.grey, base, strong) },
+        dipherMergeTheirsStrong = { bg = blend(p.blue, base, strong) },
+        -- transient flash on the lines a take-this produced
+        dipherMergeFlash = { bg = blend(p.yellow, base, 0.30) },
     }
 end
 

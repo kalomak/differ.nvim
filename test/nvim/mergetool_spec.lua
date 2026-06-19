@@ -44,7 +44,73 @@ local function conflict_repo()
     return root
 end
 
+-- a repo with a single conflict buried in a long file, so the unchanged spans either side
+-- are large enough to fold (the small repo's block fills the file and folds nothing)
+local function conflict_repo_big()
+    local function body(mid)
+        local out = {}
+        for i = 1, 14 do
+            out[#out + 1] = "line" .. i
+        end
+        out[#out + 1] = mid
+        for i = 15, 30 do
+            out[#out + 1] = "line" .. i
+        end
+        return table.concat(out, "\n") .. "\n"
+    end
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    git_ok(root, "init", "-q")
+    write(root .. "/f.txt", body("base15"))
+    git_ok(root, "add", "f.txt")
+    git_ok(root, "commit", "-q", "-m", "base")
+    git_ok(root, "checkout", "-q", "-b", "feature")
+    write(root .. "/f.txt", body("THEIRS15"))
+    git_ok(root, "commit", "-q", "-am", "theirs")
+    git_ok(root, "checkout", "-q", "main")
+    write(root .. "/f.txt", body("OURS15"))
+    git_ok(root, "commit", "-q", "-am", "ours")
+    git(root, "merge", "feature")
+    return root
+end
+
+-- a repo with three separate conflicts down one long file, so ]x has to walk and wrap and
+-- the last conflict sits near EOF (where a scroll-bound input pane used to drag the result
+-- cursor off-target and stall ]x)
+local function conflict_repo_multi()
+    local function body(a, b, c)
+        local out = {}
+        for i = 1, 30 do
+            if i == 5 then
+                out[#out + 1] = a
+            elseif i == 15 then
+                out[#out + 1] = b
+            elseif i == 25 then
+                out[#out + 1] = c
+            else
+                out[#out + 1] = "line" .. i
+            end
+        end
+        return table.concat(out, "\n") .. "\n"
+    end
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    git_ok(root, "init", "-q")
+    write(root .. "/f.txt", body("base5", "base15", "base25"))
+    git_ok(root, "add", "f.txt")
+    git_ok(root, "commit", "-q", "-m", "base")
+    git_ok(root, "checkout", "-q", "-b", "feature")
+    write(root .. "/f.txt", body("THEIRS5", "THEIRS15", "THEIRS25"))
+    git_ok(root, "commit", "-q", "-am", "theirs")
+    git_ok(root, "checkout", "-q", "main")
+    write(root .. "/f.txt", body("OURS5", "OURS15", "OURS25"))
+    git_ok(root, "commit", "-q", "-am", "ours")
+    git(root, "merge", "feature")
+    return root
+end
+
 local merge_ns = vim.api.nvim_create_namespace("dipher.merge")
+local flash_ns = vim.api.nvim_create_namespace("dipher.merge.flash")
 
 describe(":Dipher mergetool", function()
     after_each(function()
@@ -84,7 +150,7 @@ describe(":Dipher mergetool", function()
         assert.is_true(#marks > 0)
     end)
 
-    it("lands on the first conflict and walks regions with ]x", function()
+    it("lands on the first conflict", function()
         local root = conflict_repo()
         vim.cmd.edit(root .. "/f.txt")
         merge.open({})
@@ -180,5 +246,258 @@ describe(":Dipher mergetool resolution", function()
         vim.api.nvim_set_current_win(s.result_win)
         vim.cmd("write") -- markers still present
         assert.are.same({ "f.txt" }, require("dipher.git").conflicted(root))
+    end)
+end)
+
+-- the located input slab line for a side (the row sync_inputs centres on)
+---@param s table
+---@param side string
+local function input(s, side)
+    for _, inp in ipairs(s.inputs) do
+        if inp.side == side then
+            return inp
+        end
+    end
+end
+
+describe(":Dipher mergetool navigation", function()
+    after_each(function()
+        if merge.current() then
+            merge.close()
+        end
+    end)
+
+    it("walks every conflict with ]x and wraps at the end", function()
+        local root = conflict_repo_multi()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        assert.are.equal(3, #s.regions)
+        local starts = {}
+        for _, r in ipairs(s.regions) do
+            starts[#starts + 1] = r.result_start
+        end
+        local function cur()
+            return vim.api.nvim_win_get_cursor(s.result_win)[1]
+        end
+        assert.are.equal(starts[1], cur()) -- landed on the first
+        fire(s.result_buf, "dipher: next conflict")
+        assert.are.equal(starts[2], cur())
+        fire(s.result_buf, "dipher: next conflict")
+        assert.are.equal(starts[3], cur()) -- the one that used to stick the cursor
+        fire(s.result_buf, "dipher: next conflict")
+        assert.are.equal(starts[1], cur()) -- wrapped back to the first
+    end)
+
+    it("scroll-binds the merge windows for tandem scrolling", function()
+        local root = conflict_repo_multi()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+            assert.is_true(vim.wo[win].scrollbind)
+        end
+    end)
+
+    it("restores scrollbind after centring the inputs (an input zz never drags result)", function()
+        local root = conflict_repo_multi()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        -- ]x to the last conflict (the one that used to stick) and back, then confirm the
+        -- bind is intact and the result cursor landed where nav put it
+        fire(s.result_buf, "dipher: next conflict")
+        fire(s.result_buf, "dipher: next conflict")
+        assert.are.equal(s.regions[3].result_start, vim.api.nvim_win_get_cursor(s.result_win)[1])
+        assert.is_true(vim.wo[s.result_win].scrollbind)
+        for _, inp in ipairs(s.inputs) do
+            assert.is_true(vim.wo[inp.win].scrollbind)
+        end
+    end)
+
+    it("re-parses and survives a hand-edit that shifts the markers", function()
+        local root = conflict_repo_multi()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        local before = #s.regions
+        -- hand-delete the last conflict and everything after it, leaving the cached regions
+        -- pointing past the new EOF
+        vim.bo[s.result_buf].modifiable = true
+        local last = s.regions[before]
+        vim.api.nvim_buf_set_lines(s.result_buf, last.result_start - 1, -1, false, {})
+        -- a cursor move before the re-parse must not crash on the now out-of-range ranges
+        local ok = pcall(function()
+            vim.api.nvim_win_set_cursor(s.result_win, { 1, 0 })
+            vim.api.nvim_exec_autocmds("CursorMoved", { buffer = s.result_buf })
+        end)
+        assert.is_true(ok)
+        -- the edit re-parses: one fewer conflict, every region within the buffer
+        vim.api.nvim_exec_autocmds("TextChanged", { buffer = s.result_buf })
+        assert.are.equal(before - 1, #s.regions)
+        local count = vim.api.nvim_buf_line_count(s.result_buf)
+        for _, r in ipairs(s.regions) do
+            assert.is_true(r.result_end <= count)
+        end
+    end)
+
+    it("recentres the input panes as the result cursor moves between conflicts", function()
+        local root = conflict_repo_multi()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        local ours = input(s, "ours").win
+        -- the ours slab lines sit at the conflicting rows 5/15/25 of the stage file
+        vim.api.nvim_win_set_cursor(s.result_win, { s.regions[1].result_start + 1, 0 })
+        vim.api.nvim_win_call(s.result_win, function()
+            vim.api.nvim_exec_autocmds("CursorMoved", { buffer = s.result_buf })
+        end)
+        assert.are.equal(5, vim.api.nvim_win_get_cursor(ours)[1])
+        vim.api.nvim_win_set_cursor(s.result_win, { s.regions[3].result_start + 1, 0 })
+        vim.api.nvim_win_call(s.result_win, function()
+            vim.api.nvim_exec_autocmds("CursorMoved", { buffer = s.result_buf })
+        end)
+        assert.are.equal(25, vim.api.nvim_win_get_cursor(ours)[1])
+    end)
+end)
+
+describe(":Dipher mergetool UX", function()
+    after_each(function()
+        if merge.current() then
+            merge.close()
+        end
+    end)
+
+    it("keeps the raw markers visible and tints the whole region per side", function()
+        local root = conflict_repo()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+
+        -- nothing is hidden or overlaid: the result is the file the user edits
+        local marks =
+            vim.api.nvim_buf_get_extmarks(s.result_buf, merge_ns, 0, -1, { details = true })
+        for _, m in ipairs(marks) do
+            local d = m[4]
+            assert.is_nil(d.conceal)
+            assert.is_nil(d.conceal_lines)
+            assert.is_nil(d.virt_text)
+        end
+
+        -- the marker lines are still real text and carry their section's colour: <<<<<<< (2)
+        -- reads as ours, ======= (4) and the closing >>>>>>> (6) as theirs
+        local function hl_at(row)
+            local m = vim.api.nvim_buf_get_extmarks(
+                s.result_buf,
+                merge_ns,
+                { row - 1, 0 },
+                { row - 1, -1 },
+                { details = true }
+            )
+            for _, e in ipairs(m) do
+                if e[4].hl_group then
+                    return e[4].hl_group
+                end
+            end
+        end
+        local lines = vim.api.nvim_buf_get_lines(s.result_buf, 0, -1, false)
+        assert.are.equal("<<<<<<< HEAD", lines[2])
+        assert.are.equal("dipherMergeOursActive", hl_at(2))
+        assert.are.equal("dipherMergeTheirsActive", hl_at(4))
+        assert.are.equal("dipherMergeTheirsActive", hl_at(6))
+    end)
+
+    it("colours the section bodies with the per-side groups", function()
+        local root = conflict_repo()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        -- ours body is line 3 (OURS), theirs body line 5 (THEIRS)
+        local function hl_at(row)
+            local m = vim.api.nvim_buf_get_extmarks(
+                s.result_buf,
+                merge_ns,
+                { row - 1, 0 },
+                { row - 1, -1 },
+                { details = true }
+            )
+            for _, e in ipairs(m) do
+                if e[4].hl_group then
+                    return e[4].hl_group
+                end
+            end
+        end
+        -- the active conflict (under the cursor on land) paints at full strength
+        assert.are.equal("dipherMergeOursActive", hl_at(3))
+        assert.are.equal("dipherMergeTheirsActive", hl_at(5))
+    end)
+
+    it("sets a winbar on the merge windows", function()
+        local root = conflict_repo()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        assert.is_true(vim.wo[s.result_win].winbar ~= "")
+    end)
+
+    it("winbar shows the result counter and the input side labels", function()
+        local root = conflict_repo()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+
+        vim.g.statusline_winid = s.result_win
+        assert.is_truthy(merge.winbar():match("conflict 1/1"))
+
+        vim.g.statusline_winid = input(s, "ours").win
+        assert.are.equal("OURS (HEAD)", merge.winbar())
+        vim.g.statusline_winid = input(s, "theirs").win
+        assert.are.equal("THEIRS (feature)", merge.winbar())
+    end)
+
+    it("syncs the input windows to the active conflict's slab on land", function()
+        local root = conflict_repo()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        -- the ours stage file is a/OURS/c: the slab sits on line 2
+        assert.are.equal(2, vim.api.nvim_win_get_cursor(input(s, "ours").win)[1])
+        assert.are.equal(2, vim.api.nvim_win_get_cursor(input(s, "theirs").win)[1])
+    end)
+
+    it("tracks the active conflict index and emphasises it", function()
+        local root = conflict_repo()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        assert.are.equal(1, s.active_index) -- landed on the only conflict
+    end)
+
+    it("lays down latent folds in the result, open by default", function()
+        local root = conflict_repo_big()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        vim.api.nvim_win_call(s.result_win, function()
+            assert.are.equal(-1, vim.fn.foldclosed(1)) -- open out of the box
+            vim.cmd("normal! zM")
+            assert.is_true(vim.fn.foldclosed(1) > 0) -- zM collapses the unchanged span
+            vim.cmd("normal! zR")
+            assert.are.equal(-1, vim.fn.foldclosed(1))
+        end)
+    end)
+
+    it("flashes the produced lines on a take-this, then clears", function()
+        local root = conflict_repo_big()
+        vim.cmd.edit(root .. "/f.txt")
+        merge.open({})
+        local s = merge.current()
+        assert.is_true(fire(s.result_buf, "dipher: take ours"))
+        local during = vim.api.nvim_buf_get_extmarks(s.result_buf, flash_ns, 0, -1, {})
+        assert.is_true(#during > 0)
+        vim.wait(400, function()
+            return false
+        end)
+        local after = vim.api.nvim_buf_get_extmarks(s.result_buf, flash_ns, 0, -1, {})
+        assert.are.equal(0, #after)
     end)
 end)

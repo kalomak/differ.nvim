@@ -6,7 +6,13 @@
 --
 -- each input column is a read-only scratch buffer of a whole stage file, so windows use
 -- native `number` + native syntax; conflict regions are extmark-only in the dipher.merge
--- namespace (no buffer/text touch on the inputs)
+-- namespace (no buffer/text touch on the inputs).
+--
+-- the UX-polish slice makes the result readable without hiding anything: it's the file the
+-- user hand-edits, so the raw conflict markers stay as real text. each conflict region is
+-- coloured per side (marker lines included), the conflict under the cursor is emphasised, a
+-- winbar counts the conflicts, the input panes recentre on the active conflict, unchanged
+-- regions are foldable, and a take-this briefly flashes the lines it produced
 
 local set_local = require("dipher.util.win").set_local
 local bind = require("dipher.util.keymap").bind
@@ -14,22 +20,42 @@ local bind = require("dipher.util.keymap").bind
 local M = {}
 
 local merge_ns = vim.api.nvim_create_namespace("dipher.merge")
+local flash_ns = vim.api.nvim_create_namespace("dipher.merge.flash")
 
----@type table<string, string> -- column side -> region highlight group
-local REGION_HL = {
-    ours = "dipherMergeOurs",
-    base = "dipherMergeBase",
-    theirs = "dipherMergeTheirs",
-    result = "dipherMergeConflict",
+local FOLDTEXT_EXPR = 'v:lua.require("dipher.ui.foldtext").render()'
+
+---@type table<string, { normal: string, active: string }> -- result section side -> hl pair
+local SECTION_HL = {
+    ours = { normal = "dipherMergeOurs", active = "dipherMergeOursActive" },
+    base = { normal = "dipherMergeBase", active = "dipherMergeBaseActive" },
+    theirs = { normal = "dipherMergeTheirs", active = "dipherMergeTheirsActive" },
 }
+
+---@type table<string, { body: string, sign: string }> -- input side -> body hl + sign hl
+local INPUT_HL = {
+    ours = { body = "dipherMergeOursStrong", sign = "dipherMergeSignOurs" },
+    base = { body = "dipherMergeBaseStrong", sign = "dipherMergeSignBase" },
+    theirs = { body = "dipherMergeTheirsStrong", sign = "dipherMergeSignTheirs" },
+}
+
+---@class dipher.MergeInput
+---@field side "ours"|"base"|"theirs"
+---@field win integer
+---@field regions dipher.merge.ColumnRegion[]  -- the side's located slabs, original indices
 
 ---@class dipher.MergeSession
 ---@field root string
 ---@field path string
 ---@field regions dipher.merge.Region[]   -- re-derived from the live result buffer
+---@field order integer[]                 -- live region position -> original conflict index
+---@field total integer                   -- original conflict count (for the winbar N/M)
+---@field active_index integer|nil        -- live index of the conflict under the cursor
+---@field labels table<string, string>    -- side -> winbar pane label (OURS (HEAD), ...)
 ---@field result_win integer
 ---@field result_buf integer              -- the real worktree file (editable)
 ---@field bufs integer[]                  -- the scratch input buffers (deleted on close)
+---@field inputs dipher.MergeInput[]       -- the input panes (for pane sync on navigation)
+---@field win_side table<integer, string> -- window id -> side (for the winbar)
 ---@field return_tab integer
 ---@field session_tab integer
 ---@field diag_aug integer|nil            -- the DiagnosticChanged hook that hushes the result
@@ -101,63 +127,94 @@ local function make_buffer(side, path, lines)
     return buf
 end
 
--- common window dressing: real line numbers, no wrap/fold chrome, scroll-bound so the
--- columns track one another (loosely — the files diverge, the result is the spine)
----@param win integer
-local function dress(win)
-    set_local(win, "number", true)
-    set_local(win, "relativenumber", false)
-    set_local(win, "wrap", false)
-    set_local(win, "foldcolumn", "0")
-    set_local(win, "foldenable", false)
-    set_local(win, "signcolumn", "no")
-    set_local(win, "cursorline", true)
-    set_local(win, "scrollbind", true)
+-- paint a full-line background over an inclusive 1-based range (extmark-only, §invariant 2).
+-- clamps to the buffer: a hand-edit can leave a cached region pointing past the new EOF for
+-- the moment between the edit and the re-parse, and an out-of-range extmark would throw
+---@param buf integer
+---@param first integer
+---@param last integer
+---@param hl string
+local function paint_lines(buf, first, last, hl)
+    local count = vim.api.nvim_buf_line_count(buf)
+    for row = math.max(first - 1, 0), math.min(last - 1, count - 1) do
+        vim.api.nvim_buf_set_extmark(buf, merge_ns, row, 0, {
+            end_row = row + 1,
+            end_col = 0,
+            hl_group = hl,
+            hl_eol = true,
+            priority = 100,
+        })
+    end
 end
 
--- paint a buffer's conflict regions as full-line backgrounds (extmark-only, §invariant 2)
+-- paint an input pane's located slabs: a strong side tint plus a ▌ gutter sign, so the
+-- conflicting lines pop out of the otherwise full, unhighlighted stage file
 ---@param buf integer
+---@param side "ours"|"base"|"theirs"
 ---@param regions dipher.merge.ColumnRegion[]
----@param hl string
-local function paint(buf, regions, hl)
+local function paint_input(buf, side, regions)
+    local hl = INPUT_HL[side]
     for _, r in ipairs(regions) do
         for row = r.first - 1, r.last - 1 do
             vim.api.nvim_buf_set_extmark(buf, merge_ns, row, 0, {
                 end_row = row + 1,
                 end_col = 0,
-                hl_group = hl,
+                hl_group = hl.body,
                 hl_eol = true,
                 priority = 100,
+                sign_text = "▌",
+                sign_hl_group = hl.sign,
             })
         end
     end
 end
 
--- jump the result cursor to the next/prev conflict block, wrapping at the ends
----@param dir "next"|"prev"
-local function goto_conflict(dir)
-    if not (session and vim.api.nvim_win_is_valid(session.result_win)) then
+-- paint each conflict region in the result, coloured per side with the marker lines drawn
+-- in their section's colour (the markers stay visible: this is the file the user edits).
+-- ours runs <<<<<<< .. the base/sep marker, base runs ||||||| .. the sep, theirs runs
+-- ======= .. >>>>>>> (so the closing marker reads as theirs). the block under the cursor
+-- paints at full strength. driven by the live parse on the session, so a hand-edit or a
+-- splice both recompute from one source
+---@param active integer|nil  -- the live index of the conflict under the cursor
+local function paint_result(active)
+    vim.api.nvim_buf_clear_namespace(session.result_buf, merge_ns, 0, -1)
+    for _, r in ipairs(session.regions) do
+        local on = r.index == active
+        local function fill(side, first, last)
+            local pair = SECTION_HL[side]
+            paint_lines(session.result_buf, first, last, on and pair.active or pair.normal)
+        end
+        fill("ours", r.result_start, (r.mark_base or r.mark_sep) - 1)
+        if r.mark_base then
+            fill("base", r.mark_base, r.mark_sep - 1)
+        end
+        fill("theirs", r.mark_sep, r.result_end)
+    end
+end
+
+-- briefly highlight the lines a take-this produced, cleared after ~250ms on its own
+-- namespace so the flash never lingers under the section colours
+---@param buf integer
+---@param first integer  -- 1-based
+---@param count integer
+local function flash(buf, first, count)
+    if count <= 0 then
         return
     end
-    local cur = vim.api.nvim_win_get_cursor(session.result_win)[1]
-    local target
-    for _, r in ipairs(session.regions) do
-        if dir == "next" and r.result_start > cur then
-            target = target or r.result_start
-        elseif dir == "prev" and r.result_start < cur then
-            target = r.result_start -- keep the last one below the cursor
+    for row = first - 1, first - 1 + count - 1 do
+        vim.api.nvim_buf_set_extmark(buf, flash_ns, row, 0, {
+            end_row = row + 1,
+            end_col = 0,
+            hl_group = "dipherMergeFlash",
+            hl_eol = true,
+            priority = 250,
+        })
+    end
+    vim.defer_fn(function()
+        if vim.api.nvim_buf_is_valid(buf) then
+            vim.api.nvim_buf_clear_namespace(buf, flash_ns, 0, -1)
         end
-    end
-    if not target and #session.regions > 0 then -- wrap
-        target = dir == "next" and session.regions[1].result_start
-            or session.regions[#session.regions].result_start
-    end
-    if target then
-        vim.api.nvim_win_set_cursor(session.result_win, { target, 0 })
-        vim.api.nvim_win_call(session.result_win, function()
-            vim.cmd("normal! zz")
-        end)
-    end
+    end, 250)
 end
 
 -- the conflict regions of the live result buffer (re-parsed each call, so hand edits and
@@ -168,17 +225,136 @@ local function live_regions()
     return require("dipher.git.conflict").parse(lines), lines
 end
 
--- re-parse the result buffer and repaint its conflict-block backgrounds, caching the
--- regions on the session for navigation
+-- the live index of the conflict under the result cursor, else nil
+---@return integer|nil
+local function active_index()
+    if not vim.api.nvim_win_is_valid(session.result_win) then
+        return nil
+    end
+    local cur = vim.api.nvim_win_get_cursor(session.result_win)[1]
+    for _, r in ipairs(session.regions) do
+        if cur >= r.result_start and cur <= r.result_end then
+            return r.index
+        end
+    end
+    return nil
+end
+
+-- re-parse the result buffer and repaint its per-side colour + emphasis, caching the
+-- regions on the session for navigation. keeps the order map aligned: a structured splice
+-- maintains it itself (so this no-ops), but an arbitrary hand-edit + write rebuilds it to
+-- the identity so the pane sync stays consistent (degrading to live-index = original-index)
 local function repaint_result()
     local regions = live_regions()
     session.regions = regions
-    vim.api.nvim_buf_clear_namespace(session.result_buf, merge_ns, 0, -1)
-    local marks = {}
-    for _, r in ipairs(regions) do
-        marks[#marks + 1] = { index = r.index, first = r.result_start, last = r.result_end }
+    if not session.order or #session.order ~= #regions then
+        session.order = {}
+        for i = 1, #regions do
+            session.order[i] = i
+        end
     end
-    paint(session.result_buf, marks, REGION_HL.result)
+    session.active_index = active_index()
+    paint_result(session.active_index)
+end
+
+-- run fn with scrollbind off on every merge window, then restore it. the panes are
+-- scroll-bound so manual scrolling tracks across columns, but a programmatic cursor move +
+-- zz would otherwise feed back through the bind (an input pane's zz dragging the result
+-- cursor off the conflict, stalling ]x), so centring happens with the bind lifted
+---@param fn fun()
+local function without_scrollbind(fn)
+    local saved = {}
+    local function each(f)
+        for _, inp in ipairs(session.inputs) do
+            if vim.api.nvim_win_is_valid(inp.win) then
+                f(inp.win)
+            end
+        end
+        if vim.api.nvim_win_is_valid(session.result_win) then
+            f(session.result_win)
+        end
+    end
+    each(function(w)
+        saved[w] = vim.wo[w].scrollbind
+        vim.wo[w].scrollbind = false
+    end)
+    local ok, err = pcall(fn)
+    each(function(w)
+        if saved[w] ~= nil then
+            vim.wo[w].scrollbind = saved[w]
+        end
+    end)
+    if not ok then
+        error(err)
+    end
+end
+
+-- centre each input window on the active conflict's slab (matched by original index), so
+-- all panes show one conflict together. a slab that wasn't located simply doesn't scroll
+---@param index integer|nil  -- original conflict index (nil when none is active)
+local function sync_inputs(index)
+    if not (session and index) then
+        return
+    end
+    without_scrollbind(function()
+        for _, inp in ipairs(session.inputs) do
+            if vim.api.nvim_win_is_valid(inp.win) then
+                for _, r in ipairs(inp.regions) do
+                    if r.index == index then
+                        vim.api.nvim_win_set_cursor(inp.win, { r.first, 0 })
+                        vim.api.nvim_win_call(inp.win, function()
+                            vim.cmd("normal! zz")
+                        end)
+                        break
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- when the active conflict changes, repaint the emphasis and recentre the input panes on
+-- it, so moving the result cursor (by scroll or motion, not just ]x/[x) keeps ours/theirs
+-- aligned. no-ops while the cursor stays in one block, so the painter doesn't run per key
+local function on_cursor_moved()
+    if not session then
+        return
+    end
+    local active = active_index()
+    if active == session.active_index then
+        return
+    end
+    session.active_index = active
+    paint_result(active)
+    sync_inputs(active and session.order[active])
+end
+
+-- jump the result cursor to the next/prev conflict block (wrapping at the ends), repaint
+-- the emphasis, and scroll the input panes to the same conflict
+---@param dir "next"|"prev"
+local function goto_conflict(dir)
+    if not (session and vim.api.nvim_win_is_valid(session.result_win)) then
+        return
+    end
+    local cur = vim.api.nvim_win_get_cursor(session.result_win)[1]
+    local target
+    for _, r in ipairs(session.regions) do
+        if dir == "next" and r.result_start > cur then
+            target = target or r
+        elseif dir == "prev" and r.result_start < cur then
+            target = r -- keep the last one below the cursor
+        end
+    end
+    if not target and #session.regions > 0 then -- wrap
+        target = dir == "next" and session.regions[1] or session.regions[#session.regions]
+    end
+    if target then
+        vim.api.nvim_win_set_cursor(session.result_win, { target.result_start, 0 })
+        vim.api.nvim_win_call(session.result_win, function()
+            vim.cmd("normal! zz")
+        end)
+        on_cursor_moved()
+    end
 end
 
 -- the conflict at the cursor, else the first one at or below it (so a take-this from just
@@ -201,7 +377,7 @@ local function region_at(regions, lnum)
 end
 
 -- resolve the conflict under the cursor by splicing in the chosen slab, then re-derive +
--- repaint and advance to the next remaining conflict (§8.5)
+-- repaint, flash the produced lines, and advance to the next remaining conflict (§8.5)
 ---@param choice "ours"|"theirs"|"both"|"base"|"none"
 local function resolve_choice(choice)
     if not session then
@@ -216,26 +392,99 @@ local function resolve_choice(choice)
     if not region then
         return notify("no conflict under the cursor")
     end
-    local new_lines = require("dipher.merge.resolve").splice(lines, region, choice)
+    local new_lines, delta = require("dipher.merge.resolve").splice(lines, region, choice)
     if not new_lines then
         return notify("no base version in this conflict", vim.log.levels.WARN)
     end
     local anchor = region.result_start
+    local block_len = region.result_end - region.result_start + 1
+    local slab_count = delta + block_len -- the chosen slab's line count (0 for `none`)
     vim.bo[session.result_buf].modifiable = true
     vim.api.nvim_buf_set_lines(session.result_buf, 0, -1, false, new_lines)
+    table.remove(session.order, region.index) -- drop the resolved conflict's mapping
     repaint_result()
+    flash(session.result_buf, anchor, slab_count)
     -- land on the next remaining conflict at or after where this one was
     local target
     for _, r in ipairs(session.regions) do
         if r.result_start >= anchor then
-            target = target or r.result_start
+            target = target or r
         end
     end
     if target then
-        vim.api.nvim_win_set_cursor(session.result_win, { target, 0 })
+        vim.api.nvim_win_set_cursor(session.result_win, { target.result_start, 0 })
+        on_cursor_moved()
     elseif #session.regions == 0 then
         notify("all conflicts resolved — :w to save and stage")
     end
+end
+
+-- winbar text for the merge windows: the result shows the conflict counter, an input
+-- shows its static side label. a `%!` expression reading the window it renders for
+---@return string
+function M.winbar()
+    if not session then
+        return ""
+    end
+    local win = vim.g.statusline_winid
+    if win == session.result_win then
+        local remaining = #session.regions
+        if remaining == 0 then
+            return "RESULT · all resolved"
+        end
+        local total = session.total
+        local pos = 1 -- the active conflict's position among the remaining
+        for i, r in ipairs(session.regions) do
+            if r.index == session.active_index then
+                pos = i
+                break
+            end
+        end
+        local n = (total - remaining) + pos -- the absolute conflict ordinal
+        return ("RESULT · conflict %d/%d · %d unresolved"):format(n, total, remaining)
+    end
+    local side = session.win_side[win]
+    return side and (session.labels[side] or side:upper()) or ""
+end
+
+-- common window dressing: real line numbers, no wrap chrome, cursorline, folds enabled but
+-- left open (latent, like every other view); a `%!` winbar labels the pane. scroll-bound so
+-- manual scrolling tracks loosely across columns (the files diverge, the result is the
+-- spine); programmatic centring lifts the bind first (see without_scrollbind)
+---@param win integer
+local function dress(win)
+    set_local(win, "number", true)
+    set_local(win, "relativenumber", false)
+    set_local(win, "wrap", false)
+    set_local(win, "foldcolumn", "0")
+    set_local(win, "foldenable", true)
+    set_local(win, "signcolumn", "no")
+    set_local(win, "cursorline", true)
+    set_local(win, "scrollbind", true)
+    set_local(win, "winbar", '%!v:lua.require("dipher.merge").winbar()')
+end
+
+-- (re)create the native folds for a window from its fold ranges, left open by default
+-- (the structure stays so zM/zc collapse the unchanged regions on demand), mirroring
+-- view.lua:_apply_folds
+---@param win integer
+---@param folds dipher.FoldRange[]|nil
+local function apply_folds(win, folds)
+    if not vim.api.nvim_win_is_valid(win) then
+        return
+    end
+    set_local(win, "foldmethod", "manual")
+    set_local(win, "foldtext", FOLDTEXT_EXPR)
+    set_local(win, "foldenable", true)
+    vim.api.nvim_win_call(win, function()
+        vim.cmd("silent! normal! zE") -- drop existing folds before rebuilding
+        for _, f in ipairs(folds or {}) do
+            if f.last > f.first then
+                vim.cmd(("silent! %d,%dfold"):format(f.first, f.last))
+            end
+        end
+        vim.cmd("silent! normal! zR") -- open by default; the structure stays for zc/za
+    end)
 end
 
 -- end the session: drop the tab + buffers and return to the invoking tab
@@ -289,6 +538,8 @@ local function lay_out(root, relpath, model, layout)
 
     local abs = root .. "/" .. relpath
     local bufs, result_buf = {}, nil -- bufs: the scratch input buffers (deleted on close)
+    local result_col -- the result render column (for its fold ranges)
+    local inputs = {} -- { side, win, regions, folds }
     local input_wins = {}
     for i, col in ipairs(result.columns) do
         if i == result.result_index then
@@ -298,7 +549,7 @@ local function lay_out(root, relpath, model, layout)
                 vim.cmd.edit(vim.fn.fnameescape(abs))
             end)
             result_buf = vim.api.nvim_win_get_buf(result_win)
-            paint(result_buf, col.regions, REGION_HL.result)
+            result_col = col
         else
             local buf = make_buffer(col.side, relpath, col.lines)
             bufs[#bufs + 1] = buf
@@ -312,26 +563,53 @@ local function lay_out(root, relpath, model, layout)
             end
             input_wins[#input_wins + 1] = win
             vim.api.nvim_win_set_buf(win, buf)
-            paint(buf, col.regions, REGION_HL[col.side])
+            inputs[#inputs + 1] =
+                { side = col.side, win = win, regions = col.regions, folds = col.folds }
         end
     end
 
+    local win_side = { [result_win] = "result" }
     for _, win in ipairs(input_wins) do
         dress(win)
+        set_local(win, "signcolumn", "yes:1") -- room for the ▌ slab sign
     end
     dress(result_win)
 
+    local first = model.regions[1]
     session = {
         root = root,
         path = relpath,
         regions = model.regions,
+        order = {},
+        total = #model.regions,
+        active_index = nil,
+        labels = {
+            ours = ("OURS (%s)"):format((first and first.label_ours) or "HEAD"),
+            base = "BASE",
+            theirs = ("THEIRS (%s)"):format((first and first.label_theirs) or "MERGE_HEAD"),
+            result = "RESULT",
+        },
         result_win = result_win,
         result_buf = result_buf,
         bufs = bufs,
+        inputs = inputs,
+        win_side = win_side,
         return_tab = return_tab,
         session_tab = session_tab,
         diag_aug = suppress_diagnostics(result_buf), -- the markers aren't valid source
     }
+    for i = 1, #model.regions do
+        session.order[i] = i
+    end
+
+    -- paint the panes + lay down the (latent) folds
+    for _, inp in ipairs(inputs) do
+        win_side[inp.win] = inp.side
+        paint_input(vim.api.nvim_win_get_buf(inp.win), inp.side, inp.regions)
+        apply_folds(inp.win, inp.folds)
+    end
+    apply_folds(result_win, result_col and result_col.folds)
+    paint_result(nil)
 
     -- nav + take-this resolution live on the result buffer (the working surface), from
     -- the configurable merge keymaps (§4.3); falls back to the flat defaults when setup
@@ -370,11 +648,12 @@ local function lay_out(root, relpath, model, layout)
         { buffer = result_buf, silent = true, desc = "dipher: close" }
     )
 
+    local aug = vim.api.nvim_create_augroup("dipher.merge." .. result_buf, { clear = true })
     -- :w writes the real file; once no markers remain it auto-stages (git add = resolve),
     -- otherwise it just reports what's left. repaint so a hand-edit's regions stay current
     vim.api.nvim_create_autocmd("BufWritePost", {
         buffer = result_buf,
-        group = vim.api.nvim_create_augroup("dipher.merge." .. result_buf, { clear = true }),
+        group = aug,
         callback = function()
             if not session then
                 return
@@ -388,14 +667,32 @@ local function lay_out(root, relpath, model, layout)
             end
         end,
     })
+    -- keep the active-conflict emphasis tracking the cursor
+    vim.api.nvim_create_autocmd("CursorMoved", {
+        buffer = result_buf,
+        group = aug,
+        callback = on_cursor_moved,
+    })
+    -- a hand-edit shifts the marker lines: re-parse + repaint so the regions, colour, and
+    -- nav stay aligned to the live buffer (not just on splice/:w). InsertLeave covers a run
+    -- of insert-mode edits that TextChanged doesn't fire per-keystroke for
+    vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
+        buffer = result_buf,
+        group = aug,
+        callback = function()
+            if session then
+                repaint_result()
+            end
+        end,
+    })
 
-    -- land in the result on the first conflict, columns scroll-bound to it
+    -- land in the result on the first conflict; on_cursor_moved centres the inputs on it
     vim.api.nvim_set_current_win(result_win)
     if #model.regions > 0 then
         vim.api.nvim_win_set_cursor(result_win, { model.regions[1].result_start, 0 })
     end
     vim.cmd("normal! zz")
-    vim.cmd("syncbind")
+    on_cursor_moved()
 end
 
 -- resolve root + the target relpath, then build + open. with no path the current file is
