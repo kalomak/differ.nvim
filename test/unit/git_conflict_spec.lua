@@ -31,6 +31,18 @@ describe("git.conflict.parse (default style)", function()
         assert.is_nil(r.base)
     end)
 
+    it("records the separator line and leaves mark_base nil", function()
+        local r = conflict.parse(lines)[1]
+        assert.are.equal(5, r.mark_sep)
+        assert.is_nil(r.mark_base)
+    end)
+
+    it("captures the ref labels after <<<<<<< and >>>>>>>", function()
+        local r = conflict.parse(lines)[1]
+        assert.are.equal("HEAD", r.label_ours)
+        assert.are.equal("feature/x", r.label_theirs)
+    end)
+
     it("keeps the marker lines out of the slabs", function()
         local r = conflict.parse(lines)[1]
         for _, slab in ipairs({ r.ours, r.theirs }) do
@@ -59,6 +71,20 @@ describe("git.conflict.parse (diff3 / zdiff3 style)", function()
         assert.are.same({ "base line" }, r.base)
         assert.are.same({ "ours line" }, r.ours)
         assert.are.same({ "theirs line" }, r.theirs)
+    end)
+
+    it("records the ||||||| and ======= marker lines", function()
+        local r = conflict.parse(lines)[1]
+        assert.are.equal(1, r.result_start)
+        assert.are.equal(3, r.mark_base)
+        assert.are.equal(5, r.mark_sep)
+        assert.are.equal(7, r.result_end)
+    end)
+
+    it("captures the labels (the ||||||| label is ignored)", function()
+        local r = conflict.parse(lines)[1]
+        assert.are.equal("ours", r.label_ours)
+        assert.are.equal("theirs", r.label_theirs)
     end)
 end)
 
