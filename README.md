@@ -191,6 +191,10 @@ Buffer-local, scoped to each surface. All configurable via `keymaps` in `setup()
 | `<leader>co` / `ct` / `cb` | Take ours / theirs / base |
 | `<leader>ca` | Take both (ours then theirs) |
 | `dx` | Drop the conflict region |
+| `q` | Close the merge tool |
+| `g?` | Help |
+
+The result buffer is the real worktree file, so `:w` writes it and stages it once the markers are gone. Because it's a real file, a format-on-save would otherwise run over the conflict markers; the merge tool sets `vim.b.disable_autoformat` (conform's opt-out) for the session, so honour that flag in your `format_on_save` gate if you format on save.
 
 ### Launchers (a starting point)
 
@@ -267,6 +271,8 @@ require("differ").diff({
 require("differ").setup({
   layout = "stacked",            -- "stacked" | "split", toggleable per-view
   context = 10,                  -- context lines (math.huge = full file)
+  cursorline_tint = true,        -- tint the cursor line by add/remove so the change
+                                 -- kind reads under the cursor; false = plain neutral
   deep_diff = {
     enabled = true,
     granularity = "word",        -- "word" | "char"

@@ -58,10 +58,34 @@ local INPUT_HL = {
 ---@field win_side table<integer, string> -- window id -> side (for the winbar)
 ---@field return_tab integer
 ---@field session_tab integer
+---@field keymaps table                   -- resolved merge keymaps (for the g? cheatsheet)
+---@field saved_autoformat any            -- the result buffer's prior disable_autoformat, restored on close
 ---@field diag_aug integer|nil            -- the DiagnosticChanged hook that hushes the result
 
 ---@type differ.MergeSession|nil
 local session = nil
+
+-- the result-buffer conflict chords (<leader>co/ct/cb/ca, dx) are multi-key, so nvim waits
+-- timeoutlen for the completing key. a short global timeoutlen (which-key setups often run
+-- 200ms) drops them unless typed fast, so widen the window to a generous floor while the
+-- cursor sits in the result buffer and restore the user's value on leave/close. timeoutlen
+-- is global-only (no buffer scope), hence a save/restore rather than set_local; the nil
+-- guard keeps it re-entrant and never lowers an already-larger setting
+local saved_timeoutlen = nil
+
+local function bump_timeout()
+    if saved_timeoutlen == nil then
+        saved_timeoutlen = vim.o.timeoutlen
+        vim.o.timeoutlen = math.max(saved_timeoutlen, 1000)
+    end
+end
+
+local function restore_timeout()
+    if saved_timeoutlen ~= nil then
+        vim.o.timeoutlen = saved_timeoutlen
+        saved_timeoutlen = nil
+    end
+end
 
 ---@param msg string
 ---@param level integer|nil
@@ -494,6 +518,10 @@ function M.close()
     end
     local s = session
     session = nil
+    restore_timeout() -- net in case the tab teardown didn't fire BufLeave on the result buf
+    if vim.api.nvim_buf_is_valid(s.result_buf) then
+        vim.b[s.result_buf].disable_autoformat = s.saved_autoformat -- give autoformat back
+    end
     -- drop the diagnostics hook; the producers re-lint the now-resolved file on their own
     if s.diag_aug then
         pcall(vim.api.nvim_del_augroup_by_id, s.diag_aug)
@@ -512,6 +540,44 @@ function M.close()
     if vim.api.nvim_tabpage_is_valid(s.return_tab) then
         vim.api.nvim_set_current_tabpage(s.return_tab)
     end
+end
+
+-- g?: a floating keymap cheatsheet for the merge result buffer, mirroring the diff
+-- view's. rows read the session's resolved keymaps so a configured lhs shows correctly
+local function show_help()
+    if not session then
+        return
+    end
+    local km = session.keymaps
+    local function fmt(spec)
+        return type(spec) == "table" and table.concat(spec, " / ") or tostring(spec)
+    end
+    local function pair(a, b)
+        return fmt(a) .. " / " .. fmt(b)
+    end
+    local rows = {
+        { pair(km.next_conflict, km.prev_conflict), "next / previous conflict" },
+        { fmt(km.choose_ours), "take ours" },
+        { fmt(km.choose_theirs), "take theirs" },
+        { fmt(km.choose_base), "take base" },
+        { fmt(km.choose_all), "take both (ours then theirs)" },
+        { fmt(km.choose_none), "drop the conflict" },
+        { ":w", "write the file (auto-stages once resolved)" },
+        { "q", "close the merge tool" },
+        { fmt(km.help), "this help" },
+    }
+    local keyw = 0
+    for _, r in ipairs(rows) do
+        keyw = math.max(keyw, #r[1])
+    end
+    local lines = {}
+    for _, r in ipairs(rows) do
+        lines[#lines + 1] = (" %-" .. keyw .. "s   %s"):format(r[1], r[2])
+    end
+    -- dismiss on the configured help key too, not just the hardcoded q/<Esc>
+    local dismiss = { "q", "<Esc>" }
+    vim.list_extend(dismiss, type(km.help) == "table" and km.help or { km.help })
+    require("differ.ui.help").show(lines, { title = " Differ: merge ", dismiss = dismiss })
 end
 
 -- lay out the render in a fresh session tab and wire navigation
@@ -616,6 +682,12 @@ local function lay_out(root, relpath, model, layout)
     -- wasn't called, like the diff view does
     local cfg = require("differ").get_config()
     local km = cfg.keymaps.merge or require("differ.config").defaults.keymaps
+    session.keymaps = km -- for the g? cheatsheet
+    -- the result is the real file, so a format-on-save would run on :w and choke on (or
+    -- mangle) the conflict markers. set conform's buffer-local opt-out for the session,
+    -- restored on close; honoured by any format_on_save gate that checks the flag
+    session.saved_autoformat = vim.b[result_buf].disable_autoformat
+    vim.b[result_buf].disable_autoformat = true
     local function rb(action, fn, desc)
         bind(result_buf, km[action], fn, desc)
     end
@@ -640,6 +712,7 @@ local function lay_out(root, relpath, model, layout)
     rb("choose_none", function()
         resolve_choice("none")
     end, "differ: drop the conflict")
+    rb("help", show_help, "differ: keymap help")
     -- q closes the tool (conventional, no config action)
     vim.keymap.set(
         "n",
@@ -672,6 +745,18 @@ local function lay_out(root, relpath, model, layout)
         buffer = result_buf,
         group = aug,
         callback = on_cursor_moved,
+    })
+    -- widen the mapping timeout while focused in the result buffer so the multi-key
+    -- conflict chords land at any pace, not just under a short global timeoutlen
+    vim.api.nvim_create_autocmd("BufEnter", {
+        buffer = result_buf,
+        group = aug,
+        callback = bump_timeout,
+    })
+    vim.api.nvim_create_autocmd("BufLeave", {
+        buffer = result_buf,
+        group = aug,
+        callback = restore_timeout,
     })
     -- a hand-edit shifts the marker lines: re-parse + repaint so the regions, colour, and
     -- nav stay aligned to the live buffer (not just on splice/:w). InsertLeave covers a run
