@@ -54,8 +54,9 @@ local PANEL_POSITIONS = { left = true, right = true, top = true, bottom = true }
 
 -- :Differ panel [left|right|top|bottom|revspec], open the file panel over a
 -- change set and show the first file's diff (the diff window is the session anchor,
--- so there's never a panel without one). on a live session it hides/shows the sidebar
--- in place; `:Differ close` ends the session. a position word repositions a live panel
+-- so there's never a panel without one). on a live session a bare `:Differ panel`
+-- toggles the sidebar's visibility in place (bare `:Differ` just opens); `:Differ
+-- close` ends the session. a position word repositions a live panel
 -- or history sidebar, reveals a hidden sidebar there, or opens one at that edge when no
 -- session exists (height/width carry over from config); any other arg is a rev spec
 ---@param arg string|nil
@@ -86,7 +87,11 @@ function M.panel(arg)
                 .. "or :Differ close to end it"
         )
     end
-    require("differ.git").panel({ rev = (arg ~= "" and arg) or nil, open_first = true })
+    require("differ.git").panel({
+        rev = (arg ~= "" and arg) or nil,
+        open_first = true,
+        toggle = true, -- `:Differ panel` is the explicit hide/show gesture
+    })
 end
 
 local pr = function()
@@ -220,7 +225,8 @@ end
 
 -- :Differ log [arg]: file history. no arg or an arg naming a readable file →
 -- single-file history (that file, else the current buffer); `base` is the trunk
--- shortcut → branch-range history of `<base>...HEAD`; any other arg is a rev-range
+-- shortcut → branch-range history of `<base>...HEAD`; any other arg is a rev-range.
+-- bare `:Differ log` with no real file in the buffer falls back to full HEAD history
 ---@param arg string|nil
 function M.log(arg)
     if arg == "base" then
@@ -232,6 +238,14 @@ function M.log(arg)
     end
     if arg and arg ~= "" and vim.fn.filereadable(vim.fn.fnamemodify(arg, ":p")) == 0 then
         return require("differ.git").range_history({ range = arg })
+    end
+    -- bare `:Differ log` with no real file in the buffer (dashboard/unnamed/home
+    -- screen) falls back to the full HEAD history rather than warning
+    if not arg or arg == "" then
+        local file = vim.api.nvim_buf_get_name(0)
+        if file == "" or vim.fn.filereadable(file) == 0 then
+            return require("differ.git").range_history({ range = "HEAD" })
+        end
     end
     require("differ.git").history({ path = (arg ~= "" and arg) or nil })
 end
@@ -335,7 +349,8 @@ function M.dispatch(fargs)
         return require("differ.merge").open({})
     end
     -- `:Differ <rev>` is idempotent: re-running it over a live session opens the new diff
-    -- and closes the previous one (supersede), rather than toggling the sidebar
+    -- and closes the previous one (supersede). a bare `:Differ` over a live session just
+    -- (re)opens the sidebar — it never toggles it shut (`:Differ panel` is the toggle)
     require("differ.git").panel({ rev = fargs, open_first = true, supersede = true })
 end
 

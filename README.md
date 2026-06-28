@@ -43,14 +43,6 @@ The GitHub side runs in a separate process rather than the editor, so opening a 
 
 ---
 
-## Status
-
-Everything through the merge tool is built and usable: both layouts, the file picker and panel, hunk staging, file history, the full PR-review flow (inline threads, drafts, viewed-state, checks, lifecycle actions), and 3-way conflict resolution.
-
-A live layer on top of the sidecar (optimistic updates, prefetch, warm cache, server-pushed refresh) is on the roadmap, TBD. It hasn't had broad testing yet, so expect some rough edges.
-
----
-
 ## Requirements
 
 - Neovim 0.10+ (uses `vim.system`, `vim.fs.relpath`, `vim.diff`)
@@ -164,7 +156,7 @@ Buffer-local, scoped to each surface. All configurable via `keymaps` in `setup()
 |---|---|
 | `<CR>` / `o` | Open the file under the cursor |
 | `]f` / `[f` | Next / previous file |
-| `gg` / `G` | First / last file |
+| `gg` / `G` | Move cursor to first / last file |
 | `]]` / `[[` | Next / previous section |
 | `]c` / `[c` | Next / previous hunk |
 | `i` | Toggle tree / name listing |
@@ -178,8 +170,14 @@ Buffer-local, scoped to each surface. All configurable via `keymaps` in `setup()
 
 | Key | Action |
 |---|---|
-| `<CR>` / `o` | Open the commit / diff |
+| `<CR>` / `o` | Show the commit (file mode) / toggle fold (range mode) |
+| `]f` / `[f` | Next / previous file (range) or commit (file mode) |
+| `]]` / `[[` | Next / previous commit |
+| `gg` / `G` | First / last commit |
 | `za` | Toggle fold (range mode) |
+| `c` | Collapse the commit under the cursor (range mode) |
+| `O` / `C` | Expand / collapse every commit (range mode) |
+| `K` | Commit details |
 | `g?` | Help |
 
 **PR review** (on top of the diff + panel keys)
@@ -206,11 +204,11 @@ Buffer-local, scoped to each surface. All configurable via `keymaps` in `setup()
 | `q` | Close the merge tool |
 | `g?` | Help |
 
-The result buffer is the real worktree file, so `:w` writes it and stages it once the markers are gone. Because it's a real file, a format-on-save would otherwise run over the conflict markers; the merge tool sets `vim.b.disable_autoformat` (conform's opt-out) for the session, so honour that flag in your `format_on_save` gate if you format on save. If a formatter reformats the markers anyway, differ notices on save, refuses to stage the file, and warns once that the flag isn't being honoured.
+The result buffer is the real worktree file, so `:w` writes it and stages it once the markers are gone, then opens the next conflicted file; when none remain the session reports done and closes. Use `:Differ close` to stop after the current file. Because it's a real file, a format-on-save would otherwise run over the conflict markers; the merge tool sets `vim.b.disable_autoformat` (conform's opt-out) for the session, so honour that flag in your `format_on_save` gate if you format on save. If a formatter reformats the markers anyway, differ notices on save, refuses to stage the file, and warns once that the flag isn't being honoured. The merge result also disables in-buffer markdown rendering (render-markdown.nvim) for the session so the conflict markers aren't concealed as block-quotes, restoring it on close.
 
 ### Launchers (a starting point)
 
-differ ships no global launchers — only the in-view buffer maps above and the optional `command_alias`. These are the `<leader>` launchers I drive it with, as a lazy.nvim spec you can lift wholesale or trim to taste.
+differ ships no global launchers - only the in-view buffer maps above and the optional `command_alias`. These are the `<leader>` launchers I drive it with, as a lazy.nvim spec you can lift wholesale or trim to taste.
 
 ```lua
 {
@@ -219,15 +217,16 @@ differ ships no global launchers — only the in-view buffer maps above and the 
   cmd = { "Differ", "D" }, -- "D" matches command_alias below; see note above
   keys = {
     -- local diff / history
-    { "<leader>do", "<cmd>Differ<CR>",                       desc = "Diff: open (HEAD vs worktree)" },
-    { "<leader>dc", "<cmd>Differ close<CR>",                 desc = "Diff: close" },
-    { "<leader>dt", "<cmd>Differ base<CR>",                  desc = "Diff: branch total (vs base)" },
-    { "<leader>de", "<cmd>Differ gofile<CR>",                desc = "Diff: open the real file" },
-    { "<leader>dh", "<cmd>Differ log<CR>",                   desc = "Diff: file history" },
+    { '<leader>do', '<cmd>Differ HEAD<CR>',                   desc = "Diff: open (vs index)" },
+    { "<leader>dc", "<cmd>Differ close<CR>",                  desc = "Diff: close" },
+    { "<leader>dt", "<cmd>Differ base<CR>",                   desc = "Diff: branch total (vs base)" },
+    { "<leader>de", "<cmd>Differ gofile<CR>",                 desc = "Diff: open the real file" },
+    { '<leader>dd', '<cmd>Differ panel<CR>',                  desc = "Diff: panel toggle" },
+    { "<leader>dh", "<cmd>Differ log<CR>",                    desc = "Diff: file history" },
     { "<leader>dp", "<cmd>Differ log origin/HEAD...HEAD<CR>", desc = "Diff: PR range (local, no API)" },
-    { "<leader>dl", "<cmd>Differ layout<CR>",                desc = "Diff: toggle layout" },
+    { "<leader>dl", "<cmd>Differ layout<CR>",                 desc = "Diff: toggle layout" },
     -- pr review (sidecar + github)
-    { "<leader>pl", "<cmd>Differ pr list<CR>",               desc = "PR: list" },
+    { "<leader>pl", "<cmd>Differ pr list<CR>",                desc = "PR: list" },
     {
       "<leader>po",
       function()
@@ -255,6 +254,27 @@ differ ships no global launchers — only the in-view buffer maps above and the 
     require("differ").setup({ command_alias = "D" })
   end,
 }
+```
+
+### which-key
+
+differ's surfaces are scratch buffers (`buftype=nofile`), and the diff buffers carry the source file's filetype so the statusline reads right. Some which-key setups gate their trigger (re)registration on `buftype == ""`, or rebuild triggers in a way that briefly clears them globally (each `wk.add` calls `Buf.clear()`). In those setups the `<leader>` / `]` / `[` popups can fail to open over a differ buffer, even though the same keys work in a normal file. It tends to surface most reliably on filetypes with heavy buffer churn on open (e.g. a C# diff under a Roslyn setup that creates and tears down buffers), since that churn lands on which-key's trigger suspension windows.
+
+This is a property of the which-key integration, not of differ. If you hit it, pin permanent buffer-local maps on differ buffers (a plain keymap isn't managed by the trigger system, so it can't be cleared). Every differ buffer is named `differ://…`, so key off the name:
+
+```lua
+vim.api.nvim_create_autocmd("BufWinEnter", {
+  group = vim.api.nvim_create_augroup("differ-whichkey", { clear = true }),
+  callback = function(ev)
+    if not vim.api.nvim_buf_get_name(ev.buf):match("^differ://") then
+      return
+    end
+    local wk = require("which-key")
+    for _, key in ipairs({ " ", "]", "[" }) do
+      vim.keymap.set("n", key, function() wk.show(key) end, { buffer = ev.buf })
+    end
+  end,
+})
 ```
 
 ### Lua API
@@ -301,18 +321,18 @@ require("differ").setup({
     prev_hunk = "[c",
     next_file = "]f",            -- diff; panel/history step the selection
     prev_file = "[f",
-    first_file = "gg",           -- panel: jump to the first/last file in the list
+    first_file = "gg",           -- panel/history: jump to the first/last file or commit
     last_file = "G",
-    next_section = "]]",         -- panel: jump between sections (Staged/Unstaged/...)
+    next_section = "]]",         -- panel: sections (Staged/Unstaged); history: commits
     prev_section = "[[",
     scroll_down = "f",           -- all three (shadows native f/b; set false to restore)
     scroll_up = "b",
     select = { "<CR>", "o" },    -- panel, history
     help = "g?",                 -- panel, history
     toggle_listing = "i",        -- panel: toggle tree / name
-    close_node = "c",            -- panel: collapse the dir under the cursor (or its parent)
-    close_all = "C",             -- panel: collapse every dir
-    open_all = "O",              -- panel: expand every dir
+    close_node = "c",            -- panel: collapse the dir under the cursor; history: the commit
+    close_all = "C",             -- panel/history: collapse every dir / commit
+    open_all = "O",              -- panel/history: expand every dir / commit
     stage = "s", unstage = "u",  -- diff (hunk-level), panel (file-level)
     stage_all = "S", unstage_all = "U",
     more_context = "d=", less_context = "d-",  -- diff
