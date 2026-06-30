@@ -186,16 +186,20 @@ local function name_buffer(bufnr, model, side)
     end
 end
 
--- give the buffer the file's filetype so the statusline / lualine shows it, but
--- keep native treesitter and regex syntax off: the buffer holds interleaved
--- old+new lines that aren't valid source, and differ paints its own syntax pass
--- through the line map, so a native highlighter would only mangle it
+-- a private filetype rather than the source one: the buffer holds interleaved
+-- old+new lines that aren't valid source and differ paints its own syntax (the
+-- syntax module reads the language off the path, not this option), so a native
+-- highlighter would only mangle it. a source `FileType <lang>` would also attach
+-- lsp, lint and semantic-token churn to a throwaway differ:// buffer, which is what
+-- breaks which-key's trigger windows on .cs/roslyn diffs. the source filetype is
+-- stashed in a buffer var for a lualine component that wants the language label
+local DIFF_FILETYPE = "differdiff"
 ---@param bufnr integer
 ---@param path string
 local function set_filetype(bufnr, path)
-    local ft = vim.filetype.match({ filename = path }) or ""
-    if vim.bo[bufnr].filetype ~= ft then
-        vim.bo[bufnr].filetype = ft
+    vim.b[bufnr].differ_filetype = vim.filetype.match({ filename = path }) or ""
+    if vim.bo[bufnr].filetype ~= DIFF_FILETYPE then
+        vim.bo[bufnr].filetype = DIFF_FILETYPE
     end
     pcall(vim.treesitter.stop, bufnr)
     vim.bo[bufnr].syntax = "OFF"
@@ -1057,7 +1061,15 @@ function View:jump_to_file()
     if return_tab and vim.api.nvim_tabpage_is_valid(return_tab) then
         vim.api.nvim_set_current_tabpage(return_tab)
     end
-    vim.cmd.edit(vim.fn.fnameescape(abs))
+    -- if abs is already loaded (e.g. edited but left unsaved after a prior
+    -- jump-to-file), switch to that buffer instead of :edit, which would force a
+    -- disk reload and refuse with E37 over the unsaved changes
+    local bufnr = vim.fn.bufnr(abs)
+    if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
+        vim.api.nvim_win_set_buf(0, bufnr)
+    else
+        vim.cmd.edit(vim.fn.fnameescape(abs))
+    end
     if target then
         place_cursor(target, tcol)
     end
