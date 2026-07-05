@@ -52,6 +52,17 @@ local function view_in_origin(h)
     return require("differ.view").current()
 end
 
+-- fire a buffer's ]c / [c keymap by lhs, so the test exercises the real bound
+-- callback (and its opts.fallback), not a hand-rolled call to View:goto_hunk
+local function goto_hunk(bufnr, lhs)
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "n")) do
+        if m.lhs == lhs and m.callback then
+            return m.callback()
+        end
+    end
+    error("no " .. lhs .. " keymap bound on buffer " .. bufnr)
+end
+
 describe("git.range_commits / commit_files", function()
     it("lists the range's commits newest first, merges excluded", function()
         local root = repo_with_branch()
@@ -149,6 +160,40 @@ describe(":Differ log <range> (branch-range history)", function()
         h:step("prev") -- back across the boundary to c4's b.lua
         assert.are.equal(1, h.index)
         assert.are.equal("b.lua", view_in_origin(h).model.path)
+        h:close()
+    end)
+
+    it("]c / [c overflow steps across a commit's files, but stops at its edges", function()
+        local root = repo_with_branch()
+        vim.cmd.edit(root .. "/a.lua")
+        git_src.range_history({ range = "main..HEAD" })
+        local h = History.current()
+        h:_open_file(2, 1, true) -- c3 (two files): its first, a.lua
+        -- fired from the *diff window's own* ]c/[c (view.lua), the real-world path —
+        -- not the history panel's copy, which is only reached when focus happens to be
+        -- in the sidebar itself. the diff column's bufnr is stable across a file switch
+        -- (rerender reuses it), so it's read once
+        local diff_buf = view_in_origin(h).columns[1].bufnr
+        assert.are.equal("a.lua", view_in_origin(h).model.path)
+
+        goto_hunk(diff_buf, "]c") -- past a.lua's only hunk: overflow into c3's second file
+        assert.are.equal(2, h.index)
+        assert.are.equal(2, h.file_index)
+        assert.are.equal("c.lua", view_in_origin(h).model.path)
+
+        goto_hunk(diff_buf, "]c") -- past c.lua's only hunk too: c3 has no more files.
+        -- must NOT flow into c4 (that's ]f/[f's job)
+        assert.are.equal(2, h.index)
+        assert.are.equal(2, h.file_index)
+
+        goto_hunk(diff_buf, "[c") -- back over c3's own file boundary to a.lua, landing
+        -- on its last (only) hunk
+        assert.are.equal(1, h.file_index)
+        assert.are.equal("a.lua", view_in_origin(h).model.path)
+
+        goto_hunk(diff_buf, "[c") -- a.lua's first file, first hunk: stop here
+        assert.are.equal(2, h.index) -- still c3, not crossed back into c4
+        assert.are.equal(1, h.file_index)
         h:close()
     end)
 
@@ -256,15 +301,20 @@ describe(":Differ log <range> (branch-range history)", function()
         h:close()
     end)
 
-    it("toggles closed on reinvoke and tears down the driven view", function()
+    it("supersedes a live session on reinvoke, tearing down the previous driven view", function()
         local root = repo_with_branch()
         vim.cmd.edit(root .. "/a.lua")
         git_src.range_history({ range = "main..HEAD" })
-        local h = History.current()
-        local v = view_in_origin(h)
-        assert.is_true(v:is_open())
-        git_src.range_history({ range = "main..HEAD" })
-        assert.is_nil(History.current())
-        assert.is_false(v:is_open())
+        local h1 = History.current()
+        local v1 = view_in_origin(h1)
+        assert.is_true(v1:is_open())
+
+        git_src.range_history({ range = "main..HEAD" }) -- reinvoke: closes the old, opens a fresh one
+        local h2 = History.current()
+        assert.is_not_nil(h2)
+        assert.are_not.equal(h1, h2)
+        assert.is_false(v1:is_open())
+        assert.is_true(view_in_origin(h2):is_open())
+        h2:close()
     end)
 end)

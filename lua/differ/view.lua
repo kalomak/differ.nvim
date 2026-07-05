@@ -404,13 +404,23 @@ function View:_stage_offset(idx)
 end
 
 -- (re)create the native folds for each column's window from its fold ranges, left
--- open by default (the structure stays so zc/za collapse them on demand). reapplied
--- only where the ranges or windows change: a context change (d= / d-), a file switch,
--- a layout toggle, and open; never on scroll or redraw. with context = full the
--- renderer returns no ranges.
-function View:_apply_folds()
-    for _, col in ipairs(self.columns) do
+-- open by default (the structure stays so zc/za collapse them on demand), unless
+-- `closed` says otherwise. `closed[i]` (per column, keyed by the fold's `gap`
+-- boundary index, not position in the list) re-closes the fold the user had
+-- manually closed before a context change shifted the ranges; omit it to open
+-- everything (a file switch or the initial open, where the previous fold state
+-- doesn't carry over). matching by `gap` rather than list position survives a
+-- neighbouring gap disappearing from the list entirely at the new context (not
+-- just becoming a non-real single-line range): a gap's boundary index is fixed
+-- by which hunks flank it, regardless of whether *that* gap folds at either
+-- context. reapplied only where the ranges or windows change: a context change
+-- (d= / d-), a file switch, a layout toggle, and open; never on scroll or redraw.
+-- with context = full the renderer returns no ranges.
+---@param closed? table<integer, boolean>[]  -- per-column, keyed by fold.gap: "was this one closed"
+function View:_apply_folds(closed)
+    for ci, col in ipairs(self.columns) do
         local win = col.winid
+        local was_closed = closed and closed[ci]
         if win and vim.api.nvim_win_is_valid(win) then
             set_wo(win, "foldmethod", "manual")
             set_wo(win, "foldtext", FOLDTEXT_EXPR)
@@ -419,10 +429,12 @@ function View:_apply_folds()
                 vim.cmd("silent! normal! zE") -- drop existing folds before rebuilding
                 for _, f in ipairs(col.folds or {}) do
                     if f.last > f.first then
-                        vim.cmd(("silent! %d,%dfold"):format(f.first, f.last))
+                        vim.cmd(("silent! %d,%dfold"):format(f.first, f.last)) -- :fold starts closed
+                        if not (was_closed and f.gap ~= nil and was_closed[f.gap]) then
+                            vim.cmd(("silent! %dfoldopen"):format(f.first))
+                        end
                     end
                 end
-                vim.cmd("silent! normal! zR") -- open by default; the structure stays for zc/za
             end)
         end
     end
@@ -498,8 +510,27 @@ end
 -- count, so no relayout, content/map/gutter/highlights refresh in place
 ---@param n integer
 function View:set_context(n)
+    -- snapshot which folds are closed before rerender replaces col.folds with the
+    -- ranges at the new context, so a manually-closed fold (zc/zm) survives the
+    -- boundary shift instead of reopening under the user. keyed by fold.gap, not
+    -- list position, so a neighbouring gap vanishing at the new context can't
+    -- shift a later fold's key out from under it (see _apply_folds)
+    local closed = {}
+    for ci, col in ipairs(self.columns) do
+        closed[ci] = {}
+        local win = col.winid
+        if win and vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_win_call(win, function()
+                for _, f in ipairs(col.folds or {}) do
+                    if f.last > f.first and f.gap ~= nil then
+                        closed[ci][f.gap] = vim.fn.foldclosed(f.first) ~= -1
+                    end
+                end
+            end)
+        end
+    end
     self:rerender({ layout = self.layout, context = n, deep_diff = self.deep_diff })
-    self:_apply_folds() -- ranges shifted with the context; windows unchanged
+    self:_apply_folds(closed) -- ranges shifted with the context; windows unchanged
 end
 
 -- widen/narrow context by `delta`. no-op while whole-file (can't decrement ∞)
@@ -509,6 +540,17 @@ function View:adjust_context(delta)
         return
     end
     self:set_context(math.max(0, self.context + delta))
+end
+
+-- goto_hunk's fallback for the diff window's own ]c/[c: past the last/first hunk,
+-- defer to a live history session's own fallback (steps within the current commit
+-- in range mode; a no-op everywhere else, leaving the plain stop-and-notify boundary)
+---@param direction "next"|"prev"
+---@param view differ.View
+---@return boolean moved
+local function history_hunk_fallback(direction, view)
+    local history = require("differ.history").current()
+    return history ~= nil and history:goto_hunk_fallback(direction, view)
 end
 
 -- per-window appearance + buffer-local motions. our own dual-rail gutter replaces
@@ -545,10 +587,18 @@ function View:_setup_window(winid, bufnr)
     })
     local km = self.keymaps
     bind(bufnr, km.next_hunk, function()
-        self:goto_hunk("next")
+        self:goto_hunk("next", {
+            fallback = function(direction)
+                return history_hunk_fallback(direction, self)
+            end,
+        })
     end, "differ: next hunk")
     bind(bufnr, km.prev_hunk, function()
-        self:goto_hunk("prev")
+        self:goto_hunk("prev", {
+            fallback = function(direction)
+                return history_hunk_fallback(direction, self)
+            end,
+        })
     end, "differ: previous hunk")
     bind(bufnr, km.more_context, function()
         self:adjust_context(1)
@@ -979,7 +1029,10 @@ function View:_toggle_hunk(want_staged)
         return vim.notify("differ: no hunk under the cursor", vim.log.levels.WARN)
     end
     if (self.staged_hunks[idx] or false) == want_staged then
-        return vim.notify("differ: hunk already " .. (want_staged and "staged" or "unstaged"))
+        return vim.notify(
+            "differ: hunk already " .. (want_staged and "staged" or "unstaged"),
+            vim.log.levels.INFO
+        )
     end
     if self:_apply_hunk(idx, want_staged) then
         self.staging.refresh()

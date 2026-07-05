@@ -316,6 +316,25 @@ describe("view context controls", function()
         return #(view.columns[1].folds or {})
     end
 
+    -- the nth fold range that actually becomes a native fold (multi-line; a
+    -- single-line range at a file/hunk edge never passes view.lua's `f.last >
+    -- f.first` guard, so it's not a real, closeable fold)
+    local function nth_real_fold(view, n)
+        local seen = 0
+        for _, f in ipairs(view.columns[1].folds or {}) do
+            if f.last > f.first then
+                seen = seen + 1
+                if seen == n then
+                    return f
+                end
+            end
+        end
+    end
+
+    local function real_fold(view)
+        return nth_real_fold(view, 1)
+    end
+
     -- two hunks with a 5-line gap between them
     local function gap_view()
         return View.new(model("1\n2\n3\n4\n5\n6\n7\n8\n9\n", "1\nX\n3\n4\n5\n6\n7\nY\n9\n"), {
@@ -356,6 +375,93 @@ describe("view context controls", function()
         assert.are.equal(-1, fold.open) -- open by default
         assert.is_true(fold.level >= 1) -- but a real fold lives there
         assert.are.equal(5, fold.after_close) -- and zc collapses it
+        v:close()
+    end)
+
+    it("keeps a manually-closed fold closed across a context change", function()
+        local v = gap_view()
+        v:open()
+        v:set_context(1) -- folds the 5-line gap
+        local win = v.columns[1].winid
+        local fold_row = real_fold(v).first
+        vim.api.nvim_win_call(win, function()
+            vim.cmd(("normal! %dGzc"):format(fold_row))
+        end)
+        assert.are.equal(
+            fold_row,
+            vim.api.nvim_win_call(win, function()
+                return vim.fn.foldclosed(fold_row)
+            end)
+        )
+        v:set_context(0) -- narrows further: same gap, wider fold, range shifts
+        local new_fold_row = real_fold(v).first
+        assert.are.equal(
+            new_fold_row,
+            vim.api.nvim_win_call(win, function()
+                return vim.fn.foldclosed(new_fold_row) -- still closed, not reset open
+            end)
+        )
+        v:close()
+    end)
+
+    it(
+        "keeps the right fold closed when an earlier gap vanishes entirely at wider context",
+        function()
+            -- a 2-line gap then a 10-line gap between three hunks. at context=0 both are
+            -- real folds; widening to context=2 fully absorbs the 2-line gap as lead/tail
+            -- context (walk.lua never even emits a foldable line for it, so it's not just
+            -- non-real, it's absent from col.folds), while the 10-line gap stays real.
+            -- _apply_folds/set_context restore closed state by *position among real
+            -- folds*, so the vanished first entry shifts the second fold's index down
+            -- and its closed state is lost
+            local v = View.new(
+                model(
+                    "1\ng1\ng2\n2\nh1\nh2\nh3\nh4\nh5\nh6\nh7\nh8\nh9\nh10\n3\n",
+                    "X\ng1\ng2\nY\nh1\nh2\nh3\nh4\nh5\nh6\nh7\nh8\nh9\nh10\nZ\n"
+                ),
+                { layout = "stacked", context = 0, deep_diff = { enabled = true } }
+            )
+            v:open()
+            assert.are.equal(2, fold_count(v)) -- both gaps are real folds at context=0
+
+            local win = v.columns[1].winid
+            local big_gap_fold = nth_real_fold(v, 2)
+            vim.api.nvim_win_call(win, function()
+                vim.cmd(("normal! %dGzc"):format(big_gap_fold.first))
+            end)
+            assert.are.equal(
+                big_gap_fold.first,
+                vim.api.nvim_win_call(win, function()
+                    return vim.fn.foldclosed(big_gap_fold.first)
+                end)
+            )
+
+            v:set_context(2) -- the 2-line gap is fully absorbed as context and disappears
+            assert.are.equal(1, fold_count(v)) -- only the big gap's fold remains
+            local shifted_fold = nth_real_fold(v, 1)
+            assert.are.equal(
+                shifted_fold.first,
+                vim.api.nvim_win_call(win, function()
+                    return vim.fn.foldclosed(shifted_fold.first) -- still closed, not reset open
+                end)
+            )
+            v:close()
+        end
+    )
+
+    it("still opens an untouched fold after a context change", function()
+        local v = gap_view()
+        v:open()
+        v:set_context(1)
+        v:set_context(0) -- shifts the fold's range; it was never closed
+        local win = v.columns[1].winid
+        local fold_row = real_fold(v).first
+        assert.are.equal(
+            -1,
+            vim.api.nvim_win_call(win, function()
+                return vim.fn.foldclosed(fold_row)
+            end)
+        )
         v:close()
     end)
 
