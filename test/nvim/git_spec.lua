@@ -59,6 +59,113 @@ describe("git.read / changed_files", function()
         local files = git_src.changed_files(rev.source({}), root)
         assert.are.same({ { status = "M", path = "a.lua" } }, files)
     end)
+
+    it("keeps CRLF bytes intact for a rev read and an index read", function()
+        local root = vim.fn.tempname()
+        vim.fn.mkdir(root, "p")
+        git(root, "init", "-q")
+        write(root .. "/f.txt", "a\r\nb\r\nc\r\n")
+        git(root, "add", "f.txt")
+        git(root, "commit", "-q", "-m", "base")
+        write(root .. "/f.txt", "a\r\nB\r\nc\r\n")
+        git(root, "add", "f.txt") -- stage the CRLF edit into the index, worktree untouched
+
+        local head = { kind = "rev", rev = "HEAD", label = "HEAD" }
+        local index = { kind = "index", label = "INDEX" }
+        assert.are.equal("a\r\nb\r\nc\r\n", git_src.read(head, root, "f.txt"))
+        assert.are.equal("a\r\nB\r\nc\r\n", git_src.read(index, root, "f.txt"))
+    end)
+end)
+
+describe("git.read_stage", function()
+    it("keeps CRLF bytes intact for each conflict stage (base/ours/theirs)", function()
+        local root = vim.fn.tempname()
+        vim.fn.mkdir(root, "p")
+        git(root, "init", "-q")
+        write(root .. "/f.txt", "a\r\nb\r\nc\r\n")
+        git(root, "add", "f.txt")
+        git(root, "commit", "-q", "-m", "base")
+        git(root, "checkout", "-q", "-b", "feature")
+        write(root .. "/f.txt", "a\r\nTHEIRS\r\nc\r\n")
+        git(root, "commit", "-q", "-am", "theirs")
+        git(root, "checkout", "-q", "main")
+        write(root .. "/f.txt", "a\r\nOURS\r\nc\r\n")
+        git(root, "commit", "-q", "-am", "ours")
+        -- merging conflicts (non-zero exit), which is expected here: use raw
+        -- vim.system directly rather than the asserting `git` helper above, but still
+        -- pin identity so the merge doesn't abort before conflicting on runners with no
+        -- global gitconfig
+        vim.system({
+            "git",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "merge",
+            "feature",
+        }, { cwd = root, text = true }):wait()
+
+        assert.are.equal("a\r\nb\r\nc\r\n", git_src.read_stage(root, "f.txt", 1)) -- base
+        assert.are.equal("a\r\nOURS\r\nc\r\n", git_src.read_stage(root, "f.txt", 2)) -- ours
+        assert.are.equal("a\r\nTHEIRS\r\nc\r\n", git_src.read_stage(root, "f.txt", 3)) -- theirs
+    end)
+end)
+
+describe("git.read (worktree clean filter)", function()
+    local wt = { kind = "worktree", label = "WORKTREE" }
+
+    -- raw git stdout: the spec-level git() uses text=true, which collapses \r\n,
+    -- so byte-exact blob assertions read through vim.system directly
+    local function raw_indexed(root, path)
+        local res = vim.system({ "git", "show", ":" .. path }, { cwd = root }):wait()
+        assert(res.code == 0, res.stderr)
+        return res.stdout
+    end
+
+    it("cleans CRLF worktree content the way git add would (autocrlf=input)", function()
+        local root = fresh_repo()
+        git(root, "config", "core.autocrlf", "input")
+        -- a tool rewrote the tracked (LF-blob) file with CRLF endings
+        write(root .. "/a.lua", "local x = 1\r\nNEW LINE\r\nreturn x\r\n")
+        assert.are.equal("local x = 1\nNEW LINE\nreturn x\n", git_src.read(wt, root, "a.lua"))
+    end)
+
+    it("keeps CRLF when the index blob already has CRLF (safe-crlf stickiness)", function()
+        local root = fresh_repo()
+        git(root, "config", "core.autocrlf", "false")
+        write(root .. "/c.txt", "one\r\ntwo\r\n")
+        git(root, "add", "c.txt")
+        git(root, "commit", "-q", "-m", "crlf blob")
+        git(root, "config", "core.autocrlf", "input")
+        write(root .. "/c.txt", "one\r\ntwo\r\nthree\r\n")
+        -- git add wouldn't renormalise a file whose index blob has CRLF; nor do we
+        assert.are.equal("one\r\ntwo\r\nthree\r\n", git_src.read(wt, root, "c.txt"))
+    end)
+
+    it("passes CRLF through untouched when no conversion is configured", function()
+        local root = fresh_repo()
+        git(root, "config", "core.autocrlf", "false")
+        write(root .. "/c.txt", "one\r\ntwo\r\n")
+        assert.are.equal("one\r\ntwo\r\n", git_src.read(wt, root, "c.txt"))
+    end)
+
+    it("hunk staging stores the same blob a git add would (no CRLF leak)", function()
+        local root = fresh_repo()
+        git(root, "config", "core.autocrlf", "input")
+        write(root .. "/a.lua", "local x = 1\r\nNEW LINE\r\nreturn x\r\n")
+
+        local source = {
+            old = { kind = "index", label = "INDEX" },
+            new = { kind = "worktree", label = "WORKTREE" },
+        }
+        local model = git_src.model(source, root, { path = "a.lua" })
+        assert.are.equal(1, #model.hunks) -- the insert only, no phantom eol hunks
+        local patch = require("differ.git.patch")
+        local p = patch.hunk("a.lua", model.hunks[1], model.old_text, model.new_text, 0, false)
+        assert.is_true(git_src.apply_patch(root, p, false))
+        -- the staged blob is byte-identical to what `git add` would have written
+        assert.are.equal("local x = 1\nNEW LINE\nreturn x\n", raw_indexed(root, "a.lua"))
+    end)
 end)
 
 describe("git.file_entries (rev-pair sources)", function()
